@@ -1,0 +1,846 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>EduFlow - Plataforma Académica</title>
+
+    <link rel="stylesheet" href="css/style.css">
+</head>
+
+<body>
+
+    <!-- BARRA LATERAL -->
+
+    <aside class="sidebar">
+
+    <div class="logo">
+    <img src="imagen/WhatsApp Image 2026-09-14 at 7.32.01 PM.jpeg" alt="EduFlow" class="logo-image">
+
+    <div class="logo-text">
+        <strong>EduFlow</strong>
+        <span>Plataforma académica</span>
+    </div>
+</div>
+        <nav>
+
+            <a href="#" class="nav-item active" data-section="inicio">
+                <span>🏠</span>
+                Inicio
+            </a>
+
+            <a href="#" class="nav-item" data-section="tareas">
+                <span>📋</span>
+                Tareas
+            </a>
+
+            <a href="#" class="nav-item" data-section="proyectos">
+                <span>📊</span>
+                Proyectos
+            </a>
+
+            <a href="#" class="nav-item" data-section="archivos">
+                <span>📁</span>
+                Archivos
+            </a>
+
+            <a href="#" class="nav-item" data-section="documentos">
+                <span>📝</span>
+                Documentos
+            </a>
+
+            <button type="button" class="nav-item role-switch-button" id="teacherViewBtn">
+                <span>🎓</span>
+                Vista docente
+            </button>
+
+        </nav>
+
+<div class="sidebar-bottom">
+
+    <!-- CONFIGURACIÓN -->
+
+    <div class="sidebar-option" id="settingsBtn">
+
+        <div class="sidebar-option-icon settings-icon">
+            ⚙️
+        </div>
+
+        <div class="sidebar-option-text">
+            <strong>Configuración</strong>
+            <span>Personalizá tu experiencia</span>
+        </div>
+
+        <div class="sidebar-option-arrow">
+            →
+        </div>
+
+    </div>
+
+    <!-- MODO OSCURO -->
+
+    <div class="dark-mode-card">
+
+        <div class="dark-mode-left">
+
+            <div class="dark-mode-icon">
+                🌙
+            </div>
+
+            <div>
+                <strong>Modo oscuro</strong>
+                <span>Activar tema oscuro</span>
+            </div>
+
+        </div>
+
+        <label class="switch">
+
+            <input type="checkbox" id="darkModeSwitch">
+
+            <span class="slider"></span>
+
+        </label>
+
+    </div>
+
+</div>
+
+    </aside>
+
+
+    <!-- CONTENIDO PRINCIPAL -->
+
+    <main class="main">
+
+        <!-- HEADER -->
+
+        <header class="header">
+
+            <div>
+                <h1 id="page-title">Inicio</h1>
+                <p>Organizá tus actividades académicas en un solo lugar.</p>
+            </div>
+
+            <div class="header-right">
+
+                <button class="icon-button" id="notificationBtn">
+                    🔔
+                    <span class="notification-dot"></span>
+                </button>
+
+                <button class="theme-button" id="themeBtn">
+                    🌙
+                </button>
+
+                <div class="profile">
+
+                    <div class="avatar">
+                        LS
+                    </div>
+
+                    <div>
+                        <strong>Lucca Sosa</strong>
+                        <small>Alumno</small>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </header>
+
+
+        <!-- SECCIÓN INICIO -->
+
+        <section id="inicio" class="section active-section">
+
+            <div class="welcome-card">
+
+                <div>
+
+                    <span class="welcome-label">
+                        👋 Bienvenido nuevamente
+                    </span>
+
+                    <h2>
+                        Hola, Lucca
+                    </h2>
+
+                    <p>
+                        Tenés 4 tareas pendientes y 2 proyectos activos.
+                    </p>
+
+                    <button class="primary-button" id="newTaskBtn">
+                        + Nueva tarea
+                    </button>
+
+                </div>
+
+                <div class="welcome-decoration">
+                    📚
+                </div>
+
+            </div>
+
+ 
+<!-- ACCESOS RÁPIDOS -->
+
+<div class="quick-access">
+
+    <div class="quick-card" data-section="tareas">
+
+        <div class="quick-icon tasks-icon">
+            📋
+        </div>
+
+        <div class="quick-content">
+            <h3>Tareas</h3>
+            <p>4 tareas pendientes</p>
+        </div>
+
+        <span class="quick-arrow">→</span>
+
+    </div>
+
+
+    <div class="quick-card" data-section="proyectos">
+
+        <div class="quick-icon projects-icon">
+            📊
+        </div>
+
+        <div class="quick-content">
+            <h3>Proyectos</h3>
+            <p>2 proyectos activos</p>
+        </div>
+
+        <span class="quick-arrow">→</span>
+
+    </div>
+
+
+    <div class="quick-card" data-section="archivos">
+
+        <div class="quick-icon files-icon">
+            📁
+        </div>
+
+        <div class="quick-content">
+            <h3>Archivos</h3>
+            <p>28 archivos almacenados</p>
+        </div>
+
+        <span class="quick-arrow">→</span>
+
+    </div>
+
+
+    <div class="quick-card" data-section="documentos">
+
+        <div class="quick-icon documents-icon">
+            📝
+        </div>
+
+        <div class="quick-content">
+            <h3>Documentos</h3>
+            <p>7 documentos</p>
+        </div>
+
+        <span class="quick-arrow">→</span>
+
+    </div>
+
+</div>
+            <!-- CONTENIDO -->
+
+            <div class="dashboard-grid">
+
+                <!-- TAREAS -->
+
+                <div class="panel">
+
+                    <div class="panel-header">
+
+                        <div>
+                            <h3>Próximas tareas</h3>
+                            <p>Tus actividades pendientes</p>
+                        </div>
+
+                        <button class="text-button">
+                            Ver todas
+                        </button>
+
+                    </div>
+
+
+                    <div class="task-list">
+
+                        <div class="task">
+
+                            <div class="task-check"></div>
+
+                            <div class="task-info">
+
+                                <strong>
+                                    Trabajo práctico de Bases de Datos
+                                </strong>
+
+                                <span>
+                                    📅 Entrega: 10 Septiembre
+                                </span>
+
+                            </div>
+
+                            <span class="priority high">
+                                Alta
+                            </span>
+
+                        </div>
+
+
+                        <div class="task">
+
+                            <div class="task-check"></div>
+
+                            <div class="task-info">
+
+                                <strong>
+                                    Investigación sobre redes
+                                </strong>
+
+                                <span>
+                                    📅 Entrega: 14 Septiembre
+                                </span>
+
+                            </div>
+
+                            <span class="priority medium">
+                                Media
+                            </span>
+
+                        </div>
+
+
+                        <div class="task">
+
+                            <div class="task-check"></div>
+
+                            <div class="task-info">
+
+                                <strong>
+                                    Ejercicios de Python
+                                </strong>
+
+                                <span>
+                                    📅 Entrega: 18 Septiembre
+                                </span>
+
+                            </div>
+
+                            <span class="priority low">
+                                Baja
+                            </span>
+
+                        </div>
+
+                    </div>
+
+                </div>
+
+
+                <!-- ACTIVIDAD -->
+
+                <div class="panel">
+
+                    <div class="panel-header">
+
+                        <div>
+                            <h3>Actividad reciente</h3>
+                            <p>Últimos cambios</p>
+                        </div>
+
+                    </div>
+
+
+                    <div class="activity">
+
+                        <div class="activity-icon">
+                            📝
+                        </div>
+
+                        <div>
+                            <strong>
+                                Documento actualizado
+                            </strong>
+
+                            <span>
+                                Trabajo de Sistemas Operativos
+                            </span>
+
+                            <small>
+                                Hace 15 minutos
+                            </small>
+                        </div>
+
+                    </div>
+
+
+                    <div class="activity">
+
+                        <div class="activity-icon">
+                            📁
+                        </div>
+
+                        <div>
+                            <strong>
+                                Archivo subido
+                            </strong>
+
+                            <span>
+                                Redes_Trabajo_Final.pdf
+                            </span>
+
+                            <small>
+                                Hace 1 hora
+                            </small>
+                        </div>
+
+                    </div>
+
+
+                    <div class="activity">
+
+                        <div class="activity-icon">
+                            👥
+                        </div>
+
+                        <div>
+                            <strong>
+                                Nuevo miembro
+                            </strong>
+
+                            <span>
+                                Anahi se unió al proyecto
+                            </span>
+
+                            <small>
+                                Hace 3 horas
+                            </small>
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- SECCIÓN TAREAS -->
+
+        <section id="tareas" class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Mis tareas</h2>
+                    <p>Organizá tus actividades académicas.</p>
+                </div>
+
+                <button class="primary-button">
+                    + Nueva tarea
+                </button>
+
+            </div>
+
+
+            <div class="kanban">
+
+                <div class="kanban-column">
+
+                    <div class="kanban-title">
+                        <span>Por hacer</span>
+                        <b>2</b>
+                    </div>
+
+                    <div class="kanban-card">
+
+                        <strong>
+                            Trabajo de Base de Datos
+                        </strong>
+
+                        <p>
+                            Crear modelo entidad-relación.
+                        </p>
+
+                        <span class="card-date">
+                            📅 10 Septiembre
+                        </span>
+
+                    </div>
+
+
+                    <div class="kanban-card">
+
+                        <strong>
+                            Ejercicios Python
+                        </strong>
+
+                        <p>
+                            Resolver ejercicios de listas.
+                        </p>
+
+                        <span class="card-date">
+                            📅 18 Septiembre
+                        </span>
+
+                    </div>
+
+                </div>
+
+
+                <div class="kanban-column">
+
+                    <div class="kanban-title">
+                        <span>En progreso</span>
+                        <b>1</b>
+                    </div>
+
+                    <div class="kanban-card">
+
+                        <strong>
+                            Proyecto final
+                        </strong>
+
+                        <p>
+                            Desarrollo de la aplicación.
+                        </p>
+
+                        <span class="card-date">
+                            📅 25 Septiembre
+                        </span>
+
+                    </div>
+
+                </div>
+
+
+                <div class="kanban-column">
+
+                    <div class="kanban-title">
+                        <span>Completado</span>
+                        <b>2</b>
+                    </div>
+
+                    <div class="kanban-card completed">
+
+                        <strong>
+                            Investigación de redes
+                        </strong>
+
+                        <p>
+                            Trabajo entregado.
+                        </p>
+
+                        <span class="card-date">
+                            ✓ Completado
+                        </span>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- SECCIÓN PROYECTOS -->
+
+        <section id="proyectos" class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Proyectos</h2>
+                    <p>Todos tus proyectos académicos.</p>
+                </div>
+
+                <button class="primary-button">
+                    + Nuevo proyecto
+                </button>
+
+            </div>
+
+
+            <div class="projects">
+
+                <div class="project-card">
+
+                    <div class="project-icon">
+                        💻
+                    </div>
+
+                    <h3>Proyecto de Software</h3>
+
+                    <p>
+                        Desarrollo de plataforma académica.
+                    </p>
+
+                    <div class="progress">
+
+                        <div class="progress-bar">
+                            <div style="width: 70%"></div>
+                        </div>
+
+                        <span>70%</span>
+
+                    </div>
+
+                    <div class="project-members">
+                        👤 👤 👤 +2
+                    </div>
+
+                </div>
+
+
+                <div class="project-card">
+
+                    <div class="project-icon">
+                        🗄️
+                    </div>
+
+                    <h3>Base de Datos</h3>
+
+                    <p>
+                        Sistema de gestión de estudiantes.
+                    </p>
+
+                    <div class="progress">
+
+                        <div class="progress-bar">
+                            <div style="width: 45%"></div>
+                        </div>
+
+                        <span>45%</span>
+
+                    </div>
+
+                    <div class="project-members">
+                        👤 👤 +1
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- SECCIÓN ARCHIVOS -->
+
+        <section id="archivos" class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Archivos</h2>
+                    <p>Guardá y organizá tus archivos académicos.</p>
+                </div>
+
+                <button class="primary-button">
+                    ⬆ Subir archivo
+                </button>
+
+            </div>
+
+
+            <div class="storage">
+
+                <div class="storage-info">
+
+                    <span>Almacenamiento utilizado</span>
+
+                    <strong>
+                        4.2 GB / 15 GB
+                    </strong>
+
+                </div>
+
+                <div class="storage-bar">
+                    <div></div>
+                </div>
+
+            </div>
+
+
+            <div class="file-grid">
+
+                <div class="file-card">
+                    <div class="file-icon pdf">PDF</div>
+                    <strong>Trabajo_Redes.pdf</strong>
+                    <span>2.4 MB</span>
+                </div>
+
+                <div class="file-card">
+                    <div class="file-icon word">DOC</div>
+                    <strong>Informe_Final.docx</strong>
+                    <span>1.8 MB</span>
+                </div>
+
+                <div class="file-card">
+                    <div class="file-icon excel">XLS</div>
+                    <strong>Notas.xlsx</strong>
+                    <span>850 KB</span>
+                </div>
+
+                <div class="file-card">
+                    <div class="file-icon folder">📁</div>
+                    <strong>Trabajos prácticos</strong>
+                    <span>12 archivos</span>
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- DOCUMENTOS -->
+
+        <section id="documentos" class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Documentos</h2>
+                    <p>Creá y editá documentos junto a tus compañeros.</p>
+                </div>
+
+                <button class="primary-button">
+                    + Nuevo documento
+                </button>
+
+            </div>
+
+
+            <div class="document-list">
+
+                <div class="document-card">
+
+                    <div class="document-icon">
+                        📝
+                    </div>
+
+                    <div>
+
+                        <strong>
+                            Trabajo Práctico - Sistemas
+                        </strong>
+
+                        <span>
+                            Editado hace 10 minutos
+                        </span>
+
+                    </div>
+
+                    <div class="collaborators">
+                        👤 👤 👤
+                    </div>
+
+                </div>
+
+
+                <div class="document-card">
+
+                    <div class="document-icon">
+                        📝
+                    </div>
+
+                    <div>
+
+                        <strong>
+                            Proyecto Final
+                        </strong>
+
+                        <span>
+                            Editado ayer
+                        </span>
+
+                    </div>
+
+                    <div class="collaborators">
+                        👤 👤
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+    </main>
+
+
+    <!-- MODAL NUEVA TAREA -->
+
+    <div class="modal-overlay" id="taskModal">
+
+        <div class="modal">
+
+            <button class="close-modal" id="closeModal">
+                ×
+            </button>
+
+            <h2>Nueva tarea</h2>
+
+            <p>
+                Agregá una nueva actividad académica.
+            </p>
+
+            <input
+                type="text"
+                id="taskInput"
+                placeholder="Nombre de la tarea"
+            >
+
+            <select id="priorityInput">
+
+                <option value="Alta">
+                    Alta
+                </option>
+
+                <option value="Media">
+                    Media
+                </option>
+
+                <option value="Baja">
+                    Baja
+                </option>
+
+            </select>
+
+            <button class="primary-button" id="saveTask">
+                Crear tarea
+            </button>
+
+        </div>
+
+    </div>
+
+
+    <iframe
+        id="teacherFrame"
+        class="teacher-frame"
+        src="eduflow-todo-en-uno%20(1).html"
+        title="Vista docente de EduFlow"
+    ></iframe>
+
+    <script src="js/app.js"></script>
+
+</body>
+
+</html>
