@@ -1,11 +1,14 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
+from django.core.validators import RegexValidator
 
 
 class UsuarioManager(BaseUserManager):
     def create_user(self, dni, password=None, **extra_fields):
         if not dni:
             raise ValueError("El DNI es obligatorio")
+        if not password:
+            raise ValueError("La contraseña es obligatoria")
 
         usuario = self.model(dni=dni, **extra_fields)
         usuario.set_password(password)
@@ -16,15 +19,22 @@ class UsuarioManager(BaseUserManager):
         extra_fields.setdefault("is_staff", True)
         extra_fields.setdefault("is_superuser", True)
         extra_fields.setdefault("is_active", True)
+        if extra_fields.get("is_staff") is not True:
+            raise ValueError("Un superusuario debe tener is_staff=True")
+        if extra_fields.get("is_superuser") is not True:
+            raise ValueError("Un superusuario debe tener is_superuser=True")
 
         return self.create_user(dni, password, **extra_fields)
 
 
 class Usuario(AbstractUser):
     username = None
-    email = None
-
-    dni = models.CharField(max_length=8, unique=True)
+    email = models.EmailField(max_length=254, unique=True, blank=True, null=True)
+    dni = models.CharField(
+        max_length=8,
+        unique=True,
+        validators=[RegexValidator(r"^\d{8}$", "El DNI debe contener exactamente 8 números.")],
+    )
 
     USERNAME_FIELD = "dni"
     REQUIRED_FIELDS = []

@@ -1217,10 +1217,15 @@ nav {
             <a href="#documentos" class="nav-item" data-section="documentos" data-title="Documentos de Cátedra">
                 <span aria-hidden="true">📝</span> Documentos
             </a>
-            <a href="index.html" target="_top" class="role-switch-link">
+            <a href="{% url 'core:alumno' %}" target="_top" class="role-switch-link">
                 <span aria-hidden="true">👨‍🎓</span> Vista Alumno
             </a>
         </nav>
+
+        <form action="{% url 'usuarios:logout' %}" method="post" class="logout-form">
+            {% csrf_token %}
+            <button type="submit" class="sidebar-option">Cerrar sesión</button>
+        </form>
 
         <div class="sidebar-bottom">
             <button type="button" class="sidebar-option" id="settingsBtn">
@@ -1360,7 +1365,7 @@ nav {
                 <div id="tab-kanban" class="project-tab-content" role="tabpanel" aria-labelledby="btnTabKanban">
                     <div class="kanban-header">
                         <h3>Tablero del Proyecto</h3>
-                        <button type="button" class="primary-button" id="newTaskBtn">+ Nueva Tarjeta</button>
+                        <p class="read-only-notice">Vista de seguimiento. Las tareas se crean y actualizan desde los tableros de los alumnos.</p>
                     </div>
                     <div class="kanban" id="kanbanBoard"></div>
                 </div>
@@ -1467,6 +1472,29 @@ nav {
         </form>
     </dialog>
 
+    <dialog class="modal modal-small" id="evaluationModal" aria-labelledby="evaluationTitle">
+        <form id="evaluationForm">
+            <div class="modal-header">
+                <h2 id="evaluationTitle">Evaluar tarea</h2>
+                <button type="button" class="close-modal" data-close aria-label="Cerrar">×</button>
+            </div>
+            <p id="evaluationTaskTitle" class="muted"></p>
+            <div class="form-field">
+                <label for="evaluationGrade">Calificación</label>
+                <input id="evaluationGrade" type="number" min="0" max="999.99" step="0.01" required>
+            </div>
+            <div class="form-field">
+                <label for="evaluationFeedback">Retroalimentación</label>
+                <textarea id="evaluationFeedback" rows="5" maxlength="20000"></textarea>
+            </div>
+            <p id="evaluationError" class="form-error" role="alert"></p>
+            <div class="modal-actions">
+                <button type="button" class="secondary-button" data-close>Cancelar</button>
+                <button type="submit" class="primary-button">Guardar evaluación</button>
+            </div>
+        </form>
+    </dialog>
+
 
     <!-- Aviso emergente -->
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
@@ -1479,39 +1507,7 @@ nav {
     'use strict';
 
     /* ---------- Datos de ejemplo (luego vendrán de un backend) ---------- */
-    var projects = [
-        {
-            id: 'eduflow',
-            name: 'EduFlow',
-            members: ['Lucca Sosa', 'Carla Fernandez', 'Aaron Suárez', 'Alan Rodríguez'],
-            status: { label: 'En Desarrollo', css: 'in-progress' },
-            tasks: [
-                { id: 1, title: 'Diseñar Mockups de Login', desc: 'Crear los alambres de pantalla inicial.', date: '2026-10-15', column: 'todo' },
-                { id: 2, title: 'Estructura HTML Base', desc: 'Armado del maquetado inicial.', date: '2026-10-12', column: 'progress' },
-                { id: 3, title: 'Investigación de Usuarios', desc: 'Entrevistas realizadas.', date: '', column: 'done' }
-            ],
-            docs: [
-                {
-                    id: 'd1',
-                    name: 'Informe_Estructura_v1.docx',
-                    author: 'Lucca Sosa',
-                    when: 'Hace 1 hora',
-                    body: 'En este proyecto se plantea la creación de una plataforma académica llamada EduFlow, centralizando las tareas, tableros y archivos de los estudiantes universitarios...',
-                    comments: [
-                        { author: 'Prof. Gómez', text: 'Buen planteamiento de la problemática. Revisen la sintaxis en la página 2.', when: 'Ayer 18:30' }
-                    ]
-                }
-            ]
-        },
-        {
-            id: 'sistemabd',
-            name: 'Gestor de Base de Datos',
-            members: ['Juan Pérez', 'Maria Gómez'],
-            status: { label: 'En Revisión', css: 'pending' },
-            tasks: [],
-            docs: []
-        }
-    ];
+    var projects = [];
 
     var COLUMNS = [
         { key: 'todo', label: 'Por Hacer' },
@@ -1520,6 +1516,55 @@ nav {
     ];
 
     var state = { projectId: null, docId: null, editingTaskId: null, nextTaskId: 100 };
+    var evaluationTask = null;
+
+    function csrfToken() {
+        var input = document.querySelector('[name="csrfmiddlewaretoken"]');
+        return input ? input.value : '';
+    }
+
+    function mapProject(project) {
+        return {
+            id: project.id,
+            name: project.nombre,
+            dueDate: project.fecha_entrega,
+            members: project.integrantes.map(function (member) { return member.nombre; }),
+            progress: project.progreso,
+            status: project.progreso === 100
+                ? { label: 'Completado', css: 'in-progress' }
+                : { label: project.progreso ? project.progreso + '% completado' : 'Pendiente', css: project.progreso ? 'in-progress' : 'pending' },
+            tasks: project.tareas.map(function (task) {
+                return {
+                    id: task.id,
+                    title: task.titulo,
+                    desc: task.descripcion,
+                    date: task.fecha_vencimiento,
+                    column: task.estado === 'completada' ? 'done' : (task.estado === 'en_progreso' ? 'progress' : 'todo'),
+                    priority: task.prioridad,
+                    grade: task.calificacion,
+                    feedback: task.retroalimentacion
+                };
+            }),
+            docs: []
+        };
+    }
+
+    function loadProjects() {
+        return fetch('/proyectos/api/', { headers: { 'Accept': 'application/json' } })
+            .then(function (response) {
+                if (response.redirected) { window.location.assign(response.url); throw new Error('Inicia sesión de nuevo.'); }
+                return response.json().then(function (data) {
+                    if (!response.ok) throw new Error(data.error || 'No se pudieron cargar los proyectos.');
+                    return data;
+                });
+            })
+            .then(function (data) {
+                projects = data.proyectos.map(mapProject);
+                renderWelcome();
+                renderProjectGrid();
+            })
+            .catch(function (error) { toast(error.message); });
+    }
 
     /* ---------- Utilidades ---------- */
     function $(id) { return document.getElementById(id); }
@@ -1532,7 +1577,7 @@ nav {
     }
 
     function currentProject() {
-        return projects.filter(function (p) { return p.id === state.projectId; })[0];
+        return projects.filter(function (p) { return p.id === Number(state.projectId); })[0];
     }
 
     function formatDate(iso) {
@@ -1592,8 +1637,8 @@ nav {
     function renderWelcome() {
         var n = projects.length;
         $('welcomeText').textContent =
-            'Tenés ' + n + (n === 1 ? ' proyecto activo' : ' proyectos activos') +
-            ' de alumnos y materiales subidos en cátedra.';
+            'Hay ' + n + (n === 1 ? ' proyecto grupal' : ' proyectos grupales') +
+            ' para revisar.';
     }
 
     /* ---------- Archivos de cátedra ---------- */
@@ -1647,6 +1692,11 @@ nav {
         var grid = $('projectGrid');
         grid.innerHTML = '';
 
+        if (!projects.length) {
+            grid.appendChild(el('p', 'empty-column', 'Todavía no hay proyectos grupales para revisar.'));
+            return;
+        }
+
         projects.forEach(function (p) {
             var card = el('button', 'project-folder-card');
             card.type = 'button';
@@ -1659,7 +1709,8 @@ nav {
 
             var info = el('div', 'project-members-info');
             info.appendChild(el('strong', null, '👥 Integrantes:'));
-            info.appendChild(el('p', null, p.members.join(', ')));
+            info.appendChild(el('p', null, p.members.join(', ') || 'Sin integrantes asignados'));
+            info.appendChild(el('p', 'muted', 'Entrega: ' + (p.dueDate ? formatDate(p.dueDate) : 'Sin fecha')));
             card.appendChild(info);
 
             var footer = el('div', 'folder-footer');
@@ -1677,10 +1728,11 @@ nav {
     }
 
     function openProject(id) {
-        state.projectId = id;
+        state.projectId = Number(id);
         var p = currentProject();
+        if (!p) return;
         $('detailProjectTitle').textContent = 'Proyecto: ' + p.name;
-        $('detailProjectMembers').textContent = p.members.join(', ');
+        $('detailProjectMembers').textContent = p.members.join(', ') || 'Sin integrantes asignados';
         $('projectListView').hidden = true;
         $('projectDetailView').hidden = false;
         switchTab('tab-kanban');
@@ -1725,18 +1777,21 @@ nav {
                 var card = el('div', 'kanban-card' + (col.key === 'done' ? ' completed' : ''));
                 card.appendChild(el('strong', null, t.title));
                 if (t.desc) card.appendChild(el('p', null, t.desc));
+                card.appendChild(el('p', 'task-priority-label', 'Prioridad: ' + (t.priority || 'media')));
 
                 var footer = el('div', 'card-footer');
                 var dateText = col.key === 'done' ? '✓ Finalizado' : (t.date ? '📅 ' + formatDate(t.date) : 'Sin fecha');
                 var date = el('span', 'card-date' + (col.key !== 'done' && isOverdue(t.date) ? ' overdue' : ''), dateText);
                 footer.appendChild(date);
 
-                var edit = el('button', 'text-button', '✏️ Modificar');
-                edit.type = 'button';
-                edit.dataset.taskId = t.id;
-                footer.appendChild(edit);
+                var review = el('button', 'text-button', t.grade ? 'Ver / editar evaluación' : 'Calificar y retroalimentar');
+                review.type = 'button';
+                review.dataset.gradeTaskId = t.id;
+                footer.appendChild(review);
 
                 card.appendChild(footer);
+                if (t.grade) card.appendChild(el('p', 'task-grade', 'Calificación: ' + t.grade));
+                if (t.feedback) card.appendChild(el('p', 'task-feedback', 'Retroalimentación: ' + t.feedback));
                 column.appendChild(card);
             });
 
@@ -1757,50 +1812,52 @@ nav {
     }
 
     function initKanban() {
-        $('newTaskBtn').addEventListener('click', function () { openTaskModal(null); });
-
-        $('kanbanBoard').addEventListener('click', function (e) {
-            var btn = e.target.closest('[data-task-id]');
-            if (!btn) return;
-            var id = Number(btn.dataset.taskId);
-            var task = currentProject().tasks.filter(function (t) { return t.id === id; })[0];
-            if (task) openTaskModal(task);
+        $('kanbanBoard').addEventListener('click', function (event) {
+            var button = event.target.closest('[data-grade-task-id]');
+            if (!button) return;
+            var task = currentProject().tasks.filter(function (item) {
+                return item.id === Number(button.dataset.gradeTaskId);
+            })[0];
+            if (!task) return;
+            evaluationTask = task;
+            $('evaluationTaskTitle').textContent = task.title;
+            $('evaluationGrade').value = task.grade || '';
+            $('evaluationFeedback').value = task.feedback || '';
+            $('evaluationError').textContent = '';
+            $('evaluationModal').showModal();
         });
 
-        $('taskForm').addEventListener('submit', function (e) {
-            e.preventDefault();
-            var p = currentProject();
-            var data = {
-                title: $('taskTitle').value.trim(),
-                desc: $('taskDesc').value.trim(),
-                date: $('taskDate').value,
-                column: $('taskColumn').value
+        $('evaluationForm').addEventListener('submit', function (event) {
+            event.preventDefault();
+            if (!evaluationTask) return;
+            var payload = {
+                calificacion: $('evaluationGrade').value,
+                retroalimentacion: $('evaluationFeedback').value.trim()
             };
-            if (!data.title) return;
-
-            if (state.editingTaskId) {
-                var task = p.tasks.filter(function (t) { return t.id === state.editingTaskId; })[0];
-                Object.assign(task, data);
-                toast('Tarjeta actualizada');
-            } else {
-                data.id = state.nextTaskId++;
-                p.tasks.push(data);
-                toast('Tarjeta creada');
-            }
-            $('taskModal').close();
-            renderKanban();
-        });
-
-        $('deleteTaskBtn').addEventListener('click', function () {
-            var p = currentProject();
-            if (!confirm('¿Eliminar esta tarjeta?')) return;
-            p.tasks = p.tasks.filter(function (t) { return t.id !== state.editingTaskId; });
-            $('taskModal').close();
-            renderKanban();
-            toast('Tarjeta eliminada');
+            fetch('/tareas/api/' + evaluationTask.id + '/evaluacion/', {
+                method: 'PATCH',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Accept': 'application/json',
+                    'X-CSRFToken': csrfToken()
+                },
+                body: JSON.stringify(payload)
+            }).then(function (response) {
+                return response.json().then(function (data) {
+                    if (!response.ok) throw new Error(data.error || 'No se pudo guardar la evaluación.');
+                    return data;
+                });
+            }).then(function () {
+                var projectId = state.projectId;
+                $('evaluationModal').close();
+                return loadProjects().then(function () { openProject(projectId); });
+            }).then(function () {
+                toast('Evaluación guardada.');
+            }).catch(function (error) {
+                $('evaluationError').textContent = error.message;
+            });
         });
     }
-
     /* ---------- Documentos y retroalimentación ---------- */
     function renderDocs() {
         var list = $('projectDocList');
@@ -1915,7 +1972,7 @@ nav {
         initModals();
         initMisc();
         renderWelcome();
-        renderProjectGrid();
+        loadProjects();
     });
 })();
 

@@ -23,8 +23,15 @@ class Proyecto(models.Model):
             MaxValueValidator(100)
         ]
     )
+    fecha_entrega = models.DateField(blank=True, null=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     fecha_actualizacion = models.DateTimeField(auto_now=True)
 
     def __str__(self):
         return self.nombre
+
+    def actualizar_progreso(self):
+        total = self.tareas.count()
+        completadas = self.tareas.filter(estado="completada").count()
+        self.progreso = round(completadas * 100 / total) if total else 0
+        self.save(update_fields=("progreso", "fecha_actualizacion"))

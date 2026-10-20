@@ -362,3 +362,6 @@ a {
         transition-duration: 0.01ms !important;
     }
 }
+.auth-messages { margin: 0 0 1rem; }
+.auth-message { padding: .75rem 1rem; border-radius: .5rem; color: #7f1d1d; background: #fee2e2; }
+.auth-message.success { color: #14532d; background: #dcfce7; }

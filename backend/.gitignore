@@ -1,1 +1,7 @@
-pycache/*.py[cod]*.sqlite3 .env venv/ .venv/ media/
+__pycache__/
+*.py[cod]
+*.sqlite3
+.env
+venv/
+.venv/
+media/
