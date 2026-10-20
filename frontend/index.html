@@ -11,7 +11,7 @@
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
 </head>
 
-<body>
+<body data-grade-max="{{ calificacion_maxima }}">
 
     <!-- BARRA LATERAL -->
 
@@ -445,7 +445,7 @@
                     <p>Guardá y organizá tus archivos académicos.</p>
                 </div>
 
-                <button class="primary-button">
+                <button class="primary-button" id="uploadFileBtn" type="button">
                     ⬆ Subir archivo
                 </button>
 
@@ -459,7 +459,7 @@
                     <span>Almacenamiento utilizado</span>
 
                     <strong>
-                        4.2 GB / 15 GB
+                        <span id="storageUsage">Calculando almacenamiento…</span>
                     </strong>
 
                 </div>
@@ -471,33 +471,14 @@
             </div>
 
 
-            <div class="file-grid">
-
-                <div class="file-card">
-                    <div class="file-icon pdf">PDF</div>
-                    <strong>Trabajo_Redes.pdf</strong>
-                    <span>2.4 MB</span>
-                </div>
-
-                <div class="file-card">
-                    <div class="file-icon word">DOC</div>
-                    <strong>Informe_Final.docx</strong>
-                    <span>1.8 MB</span>
-                </div>
-
-                <div class="file-card">
-                    <div class="file-icon excel">XLS</div>
-                    <strong>Notas.xlsx</strong>
-                    <span>850 KB</span>
-                </div>
-
-                <div class="file-card">
-                    <div class="file-icon folder">📁</div>
-                    <strong>Trabajos prácticos</strong>
-                    <span>12 archivos</span>
-                </div>
-
+            <div class="file-toolbar">
+                <label>Proyecto <select id="fileProjectFilter"><option value="">Todos mis archivos</option></select></label>
+                <label>Carpeta <select id="fileFolderFilter"><option value="">Todas las carpetas</option></select></label>
+                <button type="button" class="secondary-button" id="newFolderBtn">Nueva carpeta</button>
             </div>
+            <input type="file" id="academicFileInput" accept=".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.txt,.csv" hidden>
+            <div class="file-grid" id="academicFileList" aria-live="polite"></div>
+            <p class="muted">PDF, DOCX, XLSX, PPTX, OpenDocument, TXT y CSV; máximo 15 MB por archivo.</p>
 
         </section>
 
@@ -513,65 +494,14 @@
                     <p>Creá y editá documentos junto a tus compañeros.</p>
                 </div>
 
-                <button class="primary-button">
+                <button class="primary-button" id="newDocumentBtn" type="button">
                     + Nuevo documento
                 </button>
 
             </div>
 
 
-            <div class="document-list">
-
-                <div class="document-card">
-
-                    <div class="document-icon">
-                        📝
-                    </div>
-
-                    <div>
-
-                        <strong>
-                            Trabajo Práctico - Sistemas
-                        </strong>
-
-                        <span>
-                            Editado hace 10 minutos
-                        </span>
-
-                    </div>
-
-                    <div class="collaborators">
-                        👤 👤 👤
-                    </div>
-
-                </div>
-
-
-                <div class="document-card">
-
-                    <div class="document-icon">
-                        📝
-                    </div>
-
-                    <div>
-
-                        <strong>
-                            Proyecto Final
-                        </strong>
-
-                        <span>
-                            Editado ayer
-                        </span>
-
-                    </div>
-
-                    <div class="collaborators">
-                        👤 👤
-                    </div>
-
-                </div>
-
-            </div>
+            <div class="document-list" id="academicDocumentList" aria-live="polite"></div>
 
         </section>
 
@@ -640,6 +570,31 @@
                 <span></span>
                 <button type="button" class="secondary-button" data-close-project>Cancelar</button>
                 <button type="button" class="primary-button" id="saveProjectBtn">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="documentModal" role="dialog" aria-modal="true" aria-labelledby="documentModalTitle">
+        <div class="modal document-editor">
+            <button type="button" class="close-modal" data-close-document aria-label="Cerrar">×</button>
+            <h2 id="documentModalTitle">Nuevo documento</h2>
+            <label for="documentTitleInput">Título</label>
+            <input id="documentTitleInput" type="text" maxlength="200" required>
+            <label for="documentProjectInput">Proyecto (opcional)</label>
+            <select id="documentProjectInput"><option value="">Documento personal</option></select>
+            <label for="documentContentInput">Contenido</label>
+            <textarea id="documentContentInput" rows="14" maxlength="1000000"></textarea>
+            <p id="documentFormError" class="form-error" role="alert"></p>
+            <div id="documentConflict" class="document-conflict" hidden>
+                <strong>Hay una versión guardada más reciente.</strong>
+                <p>Compara el contenido actual con tu borrador, combínalos en el editor y luego confirma el guardado.</p>
+                <pre id="documentConflictContent"></pre>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="danger-button" id="deleteDocumentBtn" hidden>Eliminar</button>
+                <span id="documentVersionLabel"></span>
+                <button type="button" class="secondary-button" data-close-document>Cerrar</button>
+                <button type="button" class="primary-button" id="saveDocumentBtn">Guardar</button>
             </div>
         </div>
     </div>

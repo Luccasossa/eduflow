@@ -1,5 +1,9 @@
+import os
+import uuid
+
 from django.db import models
 from django.conf import settings
+from .storage import PrivateFileSystemStorage
 
 class Carpeta(models.Model):
     nombre = models.CharField(max_length=150)
@@ -24,8 +28,16 @@ class Carpeta(models.Model):
         return self.nombre
 
 
+def ruta_archivo_segura(instance, filename):
+    extension = os.path.splitext(filename)[1].lower()
+    return f"archivos/{instance.propietario_id}/{uuid.uuid4().hex}{extension}"
+
+
 class Archivo(models.Model):
-    archivo = models.FileField(upload_to="archivos/")
+    archivo = models.FileField(upload_to=ruta_archivo_segura, storage=PrivateFileSystemStorage())
+    nombre_original = models.CharField(max_length=255, default="")
+    tipo = models.CharField(max_length=100, default="application/octet-stream")
+    tamano = models.PositiveBigIntegerField(default=0)
 
     propietario = models.ForeignKey(
         settings.AUTH_USER_MODEL,

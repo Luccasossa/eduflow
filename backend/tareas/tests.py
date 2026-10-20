@@ -148,6 +148,7 @@ class TablerosTests(TestCase):
 
     def test_profesor_consulta_y_califica_tareas_de_proyecto(self):
         proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
         tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Entrega")
         self.client.force_login(self.profesor)
         self.assertEqual(self.client.get(reverse("api_proyectos")).json()["proyectos"][0]["id"], proyecto.id)
@@ -161,12 +162,39 @@ class TablerosTests(TestCase):
         self.assertEqual(str(tarea.calificacion), "8.50")
         self.assertEqual(tarea.evaluado_por, self.profesor)
         self.assertEqual(tarea.retroalimentacion, "Buen trabajo.")
+        from proyectos.models import DevolucionDocente
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, autor=self.profesor).count(), 1)
+
+    def test_proyecto_solo_visible_y_evaluable_por_docente_asignado(self):
+        proyecto = self.crear_proyecto()
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Entrega")
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(reverse("api_proyecto", args=[proyecto.id])).status_code, 404)
+        self.assertEqual(self.client.patch(reverse("api_calificar_tarea", args=[tarea.id]), data=json.dumps({"calificacion": 8}), content_type="application/json").status_code, 404)
+        proyecto.profesores.add(self.profesor)
+        response = self.json_post(reverse("api_devoluciones", args=[proyecto.id]), {"comentario": "Revisar fuentes", "calificacion": "7.5"})
+        self.assertEqual(response.status_code, 201, response.content)
+        self.client.force_login(self.alumno)
+        self.assertEqual(len(self.client.get(reverse("api_proyecto", args=[proyecto.id])).json()["proyecto"]["devoluciones"]), 1)
+
+    def test_historial_docente_es_aditivo_y_alumno_no_puede_escribirlo(self):
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        self.client.force_login(self.profesor)
+        url = reverse("api_devoluciones", args=[proyecto.id])
+        self.assertEqual(self.json_post(url, {"comentario": "Primera devolución"}).status_code, 201)
+        self.assertEqual(self.json_post(url, {"comentario": "Segunda devolución", "calificacion": 9}).status_code, 201)
+        self.client.force_login(self.alumno)
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(self.json_post(url, {"calificacion": 10}).status_code, 403)
+        self.assertEqual(proyecto.devoluciones.count(), 2)
 
     def test_alumno_no_puede_calificar_y_profesor_no_puede_mutar_tareas(self):
         proyecto = self.crear_proyecto()
         tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Entrega")
         self.client.force_login(self.alumno)
         self.assertEqual(self.client.patch(reverse("api_calificar_tarea", args=[tarea.id]), data="{}", content_type="application/json").status_code, 403)
+        proyecto.profesores.add(self.profesor)
         self.client.force_login(self.profesor)
         self.assertEqual(self.client.patch(reverse("api_tarea", args=[tarea.id]), data=json.dumps({"estado": "completada"}), content_type="application/json").status_code, 403)
 

@@ -1,6 +1,7 @@
 from functools import wraps
 
 from django.contrib.auth.decorators import login_required
+from django.conf import settings
 from django.http import HttpResponseForbidden
 from django.shortcuts import redirect, render
 
@@ -30,9 +31,9 @@ def inicio(request):
 
 @requiere_rol("alumno")
 def inicioalumno(request):
-    return render(request, "index.html")
+    return render(request, "index.html", {"calificacion_maxima": settings.EDUFLOW_GRADE_MAX})
 
 
 @requiere_rol("profesor")
 def inicioprofe(request):
-    return render(request, "eduflow-todo-en-uno (1).html")
+    return render(request, "eduflow-todo-en-uno (1).html", {"calificacion_maxima": settings.EDUFLOW_GRADE_MAX})

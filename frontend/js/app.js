@@ -15,6 +15,11 @@
     let editingTask = null;
     let taskProjectId = null;
     let editingProject = null;
+    let academicFiles = [];
+    let folders = [];
+    let academicDocuments = [];
+    let editingDocument = null;
+    let documentConflictPending = false;
 
     async function api(url, method = "GET", data = undefined) {
         const options = { method, headers: { Accept: "application/json" } };
@@ -30,7 +35,11 @@
             window.location.assign(response.url);
             throw new Error("Tu sesión expiró. Inicia sesión de nuevo.");
         }
-        if (!response.ok) throw new Error(payload.error || "No se pudo completar la operación.");
+        if (!response.ok) {
+            const error = new Error(payload.error || "No se pudo completar la operación.");
+            error.payload = payload;
+            throw error;
+        }
         return payload;
     }
 
@@ -48,6 +57,143 @@
         toast.classList.add("visible");
         window.clearTimeout(toast._timer);
         toast._timer = window.setTimeout(() => toast.classList.remove("visible"), 3000);
+    }
+
+    function formatBytes(bytes) {
+        if (!bytes) return "0 B";
+        const units = ["B", "KB", "MB", "GB"];
+        const index = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
+        return `${(bytes / (1024 ** index)).toFixed(index ? 1 : 0)} ${units[index]}`;
+    }
+
+    async function loadFolders() {
+        const result = await api("/archivos/api/carpetas/");
+        folders = result.carpetas;
+        const select = $("#fileFolderFilter");
+        if (!select) return;
+        const selected = select.value;
+        select.replaceChildren(new Option("Todas las carpetas", ""));
+        folders.forEach((folder) => select.add(new Option(folder.nombre, folder.id)));
+        select.value = selected;
+    }
+
+    async function loadFiles() {
+        const params = new URLSearchParams();
+        if ($("#fileProjectFilter")?.value) params.set("proyecto", $("#fileProjectFilter").value);
+        if ($("#fileFolderFilter")?.value) params.set("carpeta", $("#fileFolderFilter").value);
+        try {
+            academicFiles = (await api(`/archivos/api/${params.size ? `?${params}` : ""}`)).archivos;
+            renderFiles();
+        } catch (error) { notify(error.message, true); }
+    }
+
+    function renderFiles() {
+        const list = $("#academicFileList");
+        if (!list) return;
+        list.replaceChildren();
+        if (!academicFiles.length) list.appendChild(make("p", "empty-state", "No hay archivos disponibles en esta vista."));
+        let used = 0;
+        academicFiles.forEach((file) => {
+            used += file.tamano;
+            const card = make("article", "file-card");
+            const ext = file.nombre.split(".").pop().toUpperCase();
+            card.appendChild(make("div", `file-icon ${ext.toLowerCase()}`, ext));
+            card.appendChild(make("strong", "", file.nombre));
+            card.appendChild(make("span", "", `${formatBytes(file.tamano)} · ${dateLabel(file.fecha_subida.slice(0, 10))}`));
+            if (file.proyecto_id) card.appendChild(make("span", "", `Proyecto: ${projects.find((p) => p.id === file.proyecto_id)?.nombre || "Compartido"}`));
+            const link = make("a", "text-button", "Descargar");
+            link.href = file.descarga;
+            link.setAttribute("aria-label", `Descargar ${file.nombre}`);
+            card.appendChild(link);
+            list.appendChild(card);
+        });
+        $("#storageUsage")?.replaceChildren(document.createTextNode(`${formatBytes(used)} en esta vista`));
+    }
+
+    async function loadDocuments() {
+        try {
+            academicDocuments = (await api("/documentos/api/")).documentos;
+            renderDocuments();
+        } catch (error) { notify(error.message, true); }
+    }
+
+    function renderDocuments() {
+        const list = $("#academicDocumentList");
+        if (!list) return;
+        list.replaceChildren();
+        if (!academicDocuments.length) list.appendChild(make("p", "empty-state", "Todavía no hay documentos guardados."));
+        academicDocuments.forEach((documento) => {
+            const card = make("article", "document-card");
+            card.appendChild(make("div", "document-icon", "📝"));
+            const summary = make("div");
+            summary.appendChild(make("strong", "", documento.titulo));
+            summary.appendChild(make("span", "", `${documento.proyecto || "Documento personal"} · Guardado ${dateLabel(documento.fecha_actualizacion.slice(0, 10))}`));
+            card.appendChild(summary);
+            card.appendChild(make("span", "collaborators", documento.colaboradores.map((person) => person.nombre).join(", ")));
+            const open = make("button", "text-button", documento.puede_editar ? "Abrir y editar" : "Ver");
+            open.type = "button";
+            open.addEventListener("click", () => openDocument(documento));
+            card.appendChild(open);
+            list.appendChild(card);
+        });
+    }
+
+    const documentModal = $("#documentModal");
+    function closeDocument() { documentModal?.classList.remove("show"); }
+    function openDocument(documento = null) {
+        editingDocument = documento;
+        documentConflictPending = false;
+        $("#documentModalTitle").textContent = documento ? documento.titulo : "Nuevo documento";
+        $("#documentTitleInput").value = documento?.titulo || "";
+        $("#documentContentInput").value = documento?.contenido || "";
+        $("#documentProjectInput").value = documento?.proyecto_id || "";
+        $("#documentProjectInput").disabled = Boolean(documento);
+        $("#documentTitleInput").readOnly = Boolean(documento && !documento.puede_editar);
+        $("#documentContentInput").readOnly = Boolean(documento && !documento.puede_editar);
+        $("#saveDocumentBtn").hidden = Boolean(documento && !documento.puede_editar);
+        $("#deleteDocumentBtn").hidden = !documento || !documento.puede_eliminar;
+        $("#documentVersionLabel").textContent = documento ? `Versión ${documento.version}` : "";
+        $("#documentFormError").textContent = "";
+        $("#documentConflict").hidden = true;
+        documentModal.classList.add("show");
+    }
+
+    async function saveDocument() {
+        if (documentConflictPending && !window.confirm("¿Revisaste la versión guardada y quieres guardar el borrador actual sobre ella?")) return;
+        const payload = { titulo: $("#documentTitleInput").value.trim(), contenido: $("#documentContentInput").value };
+        const project = $("#documentProjectInput").value;
+        if (!editingDocument && project) payload.proyecto = Number(project);
+        if (editingDocument) payload.version = editingDocument.version;
+        try {
+            const result = editingDocument
+                ? await api(`/documentos/api/${editingDocument.id}/`, "PATCH", payload)
+                : await api("/documentos/api/", "POST", payload);
+            closeDocument();
+            documentConflictPending = false;
+            await loadDocuments();
+            notify("Documento guardado.");
+        } catch (error) {
+            if (error.payload?.conflicto) {
+                documentConflictPending = true;
+                editingDocument.version = error.payload.documento.version;
+                $("#documentVersionLabel").textContent = `Versión guardada ${editingDocument.version}`;
+                $("#documentConflictContent").textContent = error.payload.documento.contenido;
+                $("#documentConflict").hidden = false;
+                $("#documentFormError").textContent = "Tu borrador sigue en el editor. Compara ambas versiones antes de guardar.";
+            } else {
+                $("#documentFormError").textContent = error.message;
+            }
+        }
+    }
+
+    async function deleteDocument() {
+        if (!editingDocument || !window.confirm(`¿Eliminar “${editingDocument.titulo}”?`)) return;
+        try {
+            await api(`/documentos/api/${editingDocument.id}/`, "DELETE", {});
+            closeDocument();
+            await loadDocuments();
+            notify("Documento eliminado.");
+        } catch (error) { $("#documentFormError").textContent = error.message; }
     }
 
     function make(tag, className, text) {
@@ -276,6 +422,19 @@
                 taskList.appendChild(row);
             });
             card.appendChild(taskList);
+            if (project.devoluciones && project.devoluciones.length) {
+                const feedback = make("div", "project-feedback-history");
+                feedback.appendChild(make("h4", "", "Devoluciones docentes"));
+                project.devoluciones.forEach((entry) => {
+                    const item = make("article", "project-feedback-entry");
+                    item.appendChild(make("strong", "", `${entry.autor} · ${entry.fecha.slice(0, 10)}`));
+                    if (entry.tarea || entry.documento) item.appendChild(make("small", "", `Sobre ${entry.tarea || entry.documento}`));
+                    if (entry.comentario) item.appendChild(make("p", "", entry.comentario));
+                    if (entry.calificacion) item.appendChild(make("p", "", `Calificación: ${entry.calificacion}/10`));
+                    feedback.appendChild(item);
+                });
+                card.appendChild(feedback);
+            }
             list.appendChild(card);
         });
         $("#projectCountText")?.replaceChildren(document.createTextNode(`${projects.length} proyectos grupales`));
@@ -356,6 +515,59 @@
     });
     $("#notificationBtn")?.addEventListener("click", () => notify("No tienes notificaciones nuevas."));
 
+    $("#uploadFileBtn")?.addEventListener("click", () => $("#academicFileInput")?.click());
+    $("#academicFileInput")?.addEventListener("change", async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        const data = new FormData();
+        data.append("archivo", file);
+        if ($("#fileProjectFilter")?.value) data.append("proyecto", $("#fileProjectFilter").value);
+        if ($("#fileFolderFilter")?.value) data.append("carpeta", $("#fileFolderFilter").value);
+        try {
+            const response = await fetch("/archivos/api/", { method: "POST", headers: { "X-CSRFToken": csrf, Accept: "application/json" }, body: data });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || "No se pudo subir el archivo.");
+            notify("Archivo subido.");
+            await loadFiles();
+        } catch (error) { notify(error.message, true); }
+        event.target.value = "";
+    });
+    $("#fileProjectFilter")?.addEventListener("change", () => {
+        const projectSelect = $("#documentProjectInput");
+        if (projectSelect) projectSelect.value = "";
+        loadFiles();
+    });
+    $("#fileFolderFilter")?.addEventListener("change", loadFiles);
+    $("#newFolderBtn")?.addEventListener("click", async () => {
+        const nombre = window.prompt("Nombre de la carpeta:")?.trim();
+        if (!nombre) return;
+        const body = new FormData();
+        body.append("nombre", nombre);
+        try {
+            const response = await fetch("/archivos/api/carpetas/", { method: "POST", headers: { "X-CSRFToken": csrf, Accept: "application/json" }, body });
+            const result = await response.json();
+            if (!response.ok) throw new Error(result.error || "No se pudo crear la carpeta.");
+            await loadFolders();
+            $("#fileFolderFilter").value = String(result.carpeta.id);
+            await loadFiles();
+        } catch (error) { notify(error.message, true); }
+    });
+    $("#newDocumentBtn")?.addEventListener("click", () => openDocument());
+    $("#saveDocumentBtn")?.addEventListener("click", saveDocument);
+    $("#deleteDocumentBtn")?.addEventListener("click", deleteDocument);
+    $$('[data-close-document]').forEach((button) => button.addEventListener("click", closeDocument));
+    documentModal?.addEventListener("click", (event) => { if (event.target === documentModal) closeDocument(); });
+
     loadTasks();
-    loadProjects();
+    loadProjects().then(() => {
+        const fileProject = $("#fileProjectFilter");
+        const docProject = $("#documentProjectInput");
+        projects.forEach((project) => {
+            fileProject?.add(new Option(project.nombre, project.id));
+            docProject?.add(new Option(project.nombre, project.id));
+        });
+        loadFiles();
+    });
+    loadFolders().catch((error) => notify(error.message, true));
+    loadDocuments();
 })();

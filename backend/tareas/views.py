@@ -6,8 +6,11 @@ from django.core.exceptions import ValidationError
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_http_methods
+from django.conf import settings
 
 from proyectos.models import Proyecto
+from proyectos.models import DevolucionDocente
+from proyectos.permissions import profesor_autorizado
 from .models import Tarea
 
 
@@ -51,7 +54,8 @@ def _proyecto_autorizado(request, proyecto_id):
     proyecto = get_object_or_404(Proyecto, pk=proyecto_id)
     rol = _rol(request.user)
     if rol == "profesor":
-        return proyecto
+        if profesor_autorizado(request.user, proyecto):
+            return proyecto
     if rol == "alumno" and (
         proyecto.creador_id == request.user.id
         or proyecto.integrantes.filter(pk=request.user.pk).exists()
@@ -66,7 +70,7 @@ def _tarea_autorizada(request, pk):
     if tarea.proyecto_id is None:
         if rol == "alumno" and tarea.creador_id == request.user.id:
             return tarea
-    elif rol == "profesor" or (
+    elif (rol == "profesor" and profesor_autorizado(request.user, tarea.proyecto)) or (
         rol == "alumno"
         and (tarea.proyecto.creador_id == request.user.id
              or tarea.proyecto.integrantes.filter(pk=request.user.pk).exists())
@@ -111,6 +115,8 @@ def api_tareas(request):
             tareas = Tarea.objects.filter(creador=request.user, proyecto__isnull=True)
         else:
             tareas = Tarea.objects.filter(proyecto__isnull=False)
+            if not request.user.is_superuser:
+                tareas = tareas.filter(proyecto__profesores=request.user)
 
         estado = request.GET.get("estado", "")
         prioridad = request.GET.get("prioridad", "")
@@ -192,19 +198,23 @@ def api_tarea(request, pk):
 def api_calificar_tarea(request, pk):
     if _rol(request.user) != "profesor":
         return JsonResponse({"error": "Solo los profesores pueden calificar tareas."}, status=403)
-    tarea = get_object_or_404(Tarea.objects.filter(proyecto__isnull=False), pk=pk)
+    tarea = get_object_or_404(Tarea.objects.select_related("proyecto").filter(proyecto__isnull=False), pk=pk)
+    if not profesor_autorizado(request.user, tarea.proyecto):
+        raise Http404
     data = _json_body(request)
     if data is None:
         return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON válido."}, status=400)
     if "calificacion" not in data:
         return JsonResponse({"error": "Indica una calificación válida."}, status=400)
     try:
-        calificacion = forms.DecimalField(max_digits=5, decimal_places=2, min_value=0).clean(data["calificacion"])
+        calificacion = forms.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=settings.EDUFLOW_GRADE_MAX).clean(data["calificacion"])
         retroalimentacion = str(data.get("retroalimentacion", "")).strip()
         if len(retroalimentacion) > 20000:
             raise ValueError
     except (ValidationError, ValueError, TypeError):
         return JsonResponse({"error": "La calificación o retroalimentación no es válida."}, status=400)
+    DevolucionDocente.objects.create(proyecto=tarea.proyecto, tarea=tarea, autor=request.user,
+                                     calificacion=calificacion, comentario=retroalimentacion)
     tarea.calificacion = calificacion
     tarea.retroalimentacion = retroalimentacion
     tarea.evaluado_por = request.user

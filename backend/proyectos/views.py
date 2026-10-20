@@ -3,12 +3,16 @@ from datetime import date
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.db.models import ProtectedError
+from django.core.exceptions import ValidationError
+from django.conf import settings
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_GET, require_http_methods
 
 from usuarios.models import Usuario
-from .models import Proyecto
+from .models import DevolucionDocente, Proyecto
+from .permissions import alumno_integrante, profesor_autorizado
 
 
 def _rol(usuario):
@@ -38,10 +42,10 @@ def _es_integrante(proyecto, usuario):
 
 
 def _proyecto_visible(request, pk):
-    proyecto = get_object_or_404(Proyecto.objects.prefetch_related("integrantes"), pk=pk)
-    if _rol(request.user) == "profesor":
+    proyecto = get_object_or_404(Proyecto.objects.prefetch_related("integrantes", "profesores"), pk=pk)
+    if profesor_autorizado(request.user, proyecto):
         return proyecto
-    if _rol(request.user) == "alumno" and _es_integrante(proyecto, request.user):
+    if alumno_integrante(request.user, proyecto):
         return proyecto
     raise Http404
 
@@ -78,6 +82,21 @@ def _serializar_proyecto(proyecto, usuario=None):
             }
             for tarea in tareas
         ],
+        "devoluciones": [_serializar_devolucion(d) for d in proyecto.devoluciones.select_related("autor", "tarea", "documento").all()],
+    }
+
+
+def _serializar_devolucion(d):
+    return {
+        "id": d.id,
+        "comentario": d.comentario,
+        "calificacion": str(d.calificacion) if d.calificacion is not None else "",
+        "autor": d.autor.get_full_name() or d.autor.dni,
+        "fecha": d.fecha_creacion.isoformat(),
+        "tarea_id": d.tarea_id,
+        "tarea": d.tarea.titulo if d.tarea_id else "",
+        "documento_id": d.documento_id,
+        "documento": d.documento.titulo if d.documento_id else "",
     }
 
 
@@ -102,7 +121,7 @@ def api_proyectos(request):
 
     if request.method == "GET":
         if rol == "profesor":
-            proyectos = Proyecto.objects.all()
+            proyectos = Proyecto.objects.all() if request.user.is_superuser else Proyecto.objects.filter(profesores=request.user)
         else:
             from django.db.models import Q
             proyectos = Proyecto.objects.filter(Q(creador=request.user) | Q(integrantes=request.user)).distinct()
@@ -150,7 +169,10 @@ def api_proyecto(request, pk):
     if _rol(request.user) != "alumno" or proyecto.creador_id != request.user.id:
         return JsonResponse({"error": "Solo quien creó el proyecto puede modificarlo."}, status=403)
     if request.method == "DELETE":
-        proyecto.delete()
+        try:
+            proyecto.delete()
+        except ProtectedError:
+            return JsonResponse({"error": "No se puede eliminar un proyecto que ya tiene devoluciones docentes registradas."}, status=409)
         return JsonResponse({"eliminado": True})
 
     data = _json_body(request)
@@ -180,6 +202,47 @@ def api_proyecto(request, pk):
         proyecto.integrantes.set([request.user, *miembros])
     proyecto.save()
     return JsonResponse({"proyecto": _serializar_proyecto(proyecto, request.user)})
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def api_devoluciones(request, pk):
+    proyecto = get_object_or_404(Proyecto, pk=pk)
+    if request.method == "GET":
+        if not (profesor_autorizado(request.user, proyecto) or alumno_integrante(request.user, proyecto)):
+            raise Http404
+        entries = proyecto.devoluciones.select_related("autor", "tarea", "documento").all()
+        return JsonResponse({"devoluciones": [_serializar_devolucion(d) for d in entries]})
+    if not profesor_autorizado(request.user, proyecto):
+        return JsonResponse({"error": "No tienes autorización para evaluar este proyecto."}, status=403)
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON válido."}, status=400)
+    comentario = data.get("comentario", "")
+    if not isinstance(comentario, str) or len(comentario.strip()) > 20000:
+        return JsonResponse({"error": "El comentario debe ser texto de hasta 20.000 caracteres."}, status=400)
+    try:
+        from decimal import Decimal, InvalidOperation
+        calificacion = None
+        if data.get("calificacion") not in (None, ""):
+            calificacion = Decimal(str(data["calificacion"]))
+            if not calificacion.is_finite() or calificacion < 0 or calificacion > Decimal(str(getattr(settings, "EDUFLOW_GRADE_MAX", 10))):
+                raise InvalidOperation
+        tarea = None
+        documento = None
+        if data.get("tarea_id") not in (None, ""):
+            from tareas.models import Tarea
+            tarea = get_object_or_404(Tarea, pk=data["tarea_id"], proyecto=proyecto)
+        if data.get("documento_id") not in (None, ""):
+            from documentos.models import Documento
+            documento = get_object_or_404(Documento, pk=data["documento_id"], proyecto=proyecto)
+        entry = DevolucionDocente(proyecto=proyecto, tarea=tarea, documento=documento,
+                                  autor=request.user, comentario=comentario.strip(), calificacion=calificacion)
+        entry.full_clean()
+        entry.save()
+    except (ValueError, TypeError, InvalidOperation, ValidationError):
+        return JsonResponse({"error": f"La calificación debe estar entre 0 y {getattr(settings, 'EDUFLOW_GRADE_MAX', 10)} y la devolución debe incluir comentario o nota."}, status=400)
+    return JsonResponse({"devolucion": _serializar_devolucion(entry)}, status=201)
 
 
 @login_required

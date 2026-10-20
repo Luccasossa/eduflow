@@ -102,9 +102,6 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/6.1/ref/settings/#databases
-
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
@@ -122,6 +119,7 @@ DATABASES = {
 }
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
+
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -165,6 +163,7 @@ STATICFILES_DIRS = [
 
 LOGIN_URL = 'usuarios:login'
 LOGIN_REDIRECT_URL = 'core:inicio'
+EDUFLOW_GRADE_MAX = int(os.environ.get('EDUFLOW_GRADE_MAX', '10'))
 LOGOUT_REDIRECT_URL = 'usuarios:login'
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = True
@@ -174,6 +173,12 @@ CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.environ.get('CSRF_TRUSTE
 
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
+private_media_path = Path(os.environ.get('EDUFLOW_PRIVATE_MEDIA_ROOT') or (BASE_DIR / 'private_media'))
+if not private_media_path.is_absolute():
+    private_media_path = BASE_DIR / private_media_path
+PRIVATE_MEDIA_ROOT = private_media_path.resolve()
+if PRIVATE_MEDIA_ROOT == MEDIA_ROOT.resolve() or PRIVATE_MEDIA_ROOT.is_relative_to(MEDIA_ROOT.resolve()) or MEDIA_ROOT.resolve().is_relative_to(PRIVATE_MEDIA_ROOT):
+    raise ImproperlyConfigured('EDUFLOW_PRIVATE_MEDIA_ROOT debe quedar fuera de MEDIA_ROOT.')
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
