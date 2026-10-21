@@ -10,49 +10,24 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
-import pymysql
-pymysql.install_as_MySQLdb()
-
-# --- AGREGAR ESTO PARA OMITIR EL REQUISITO DE VERSIÓN DE MARIADB ---
-from django.db.backends.mysql.base import DatabaseWrapper
-DatabaseWrapper.check_database_version_supported = lambda self: None
-
-from django.db.backends.mysql.features import DatabaseFeatures
-DatabaseFeatures.can_return_columns_from_insert = False
-DatabaseFeatures.can_return_rows_from_bulk_insert = False
-
-from pathlib import Path
-import os
-from django.core.exceptions import ImproperlyConfigured
-from django.core.management.utils import get_random_secret_key
+#from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
+#BASE_DIR = Path(__file__).resolve().parent.parent
+from pathlib import Path
+
 BASE_DIR = Path(__file__).resolve().parent.parent
-
-# Carga opcional de variables locales sin exigir una dependencia adicional.
-env_file = BASE_DIR / '.env'
-if env_file.exists():
-    for raw_line in env_file.read_text(encoding='utf-8').splitlines():
-        line = raw_line.strip()
-        if line and not line.startswith('#') and '=' in line:
-            key, value = line.split('=', 1)
-            os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
-
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
+# SECURITY WARNING: keep the secret key used in production secret!
+SECRET_KEY = 'django-insecure-e4g3s7gst-__slszzwxn^$+h7xnb2z)#y^58%v^=4f&ew=p4a4'
+
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get('DJANGO_DEBUG', 'true').lower() == 'true'
+DEBUG = True
 
-# Never ship a fixed key. Development may use an ephemeral key; production must configure one.
-SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY')
-if not SECRET_KEY:
-    if not DEBUG:
-        raise ImproperlyConfigured('Configura DJANGO_SECRET_KEY antes de iniciar con DEBUG=false.')
-    SECRET_KEY = get_random_secret_key()
-
-ALLOWED_HOSTS = [host.strip() for host in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,testserver').split(',') if host.strip()]
+ALLOWED_HOSTS = []
 
 
 # Application definition
@@ -87,7 +62,7 @@ ROOT_URLCONF = 'config.urls'
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
-        'DIRS': [BASE_DIR.parent / 'frontend'],
+        'DIRS': [BASE_DIR / 'templates', BASE_DIR / 'templatess'],
         'APP_DIRS': True,
         'OPTIONS': {
             'context_processors': [
@@ -102,24 +77,28 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 
+# Database
+# https://docs.djangoproject.com/en/6.1/ref/settings/#databases
+
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.mysql',
-        'NAME': 'eduflow',       # Asegúrate de que esta base de datos exista en XAMPP o cámbiala por el nombre que uses
+        'NAME': 'eduflow',
         'USER': 'root',
         'PASSWORD': '',
         'HOST': '127.0.0.1',
         'PORT': '3306',
         'OPTIONS': {
             'charset': 'utf8mb4',
-            # Esto evita que Django bloquee la conexión por la versión de MariaDB (10.4)
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
         },
     }
 }
+
+
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
-
 
 AUTH_PASSWORD_VALIDATORS = [
     {
@@ -153,32 +132,14 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-STATIC_URL = '/static/'
+STATIC_URL = 'static/'
 
 STATICFILES_DIRS = [
-    ('css', BASE_DIR.parent / 'frontend' / 'css'),
-    ('js', BASE_DIR.parent / 'frontend' / 'js'),
-    ('imagen', BASE_DIR.parent / 'frontend' / 'imagen'),
+    BASE_DIR / 'static',
 ]
-
-LOGIN_URL = 'usuarios:login'
-LOGIN_REDIRECT_URL = 'core:inicio'
-EDUFLOW_GRADE_MAX = int(os.environ.get('EDUFLOW_GRADE_MAX', '10'))
-LOGOUT_REDIRECT_URL = 'usuarios:login'
-SESSION_COOKIE_HTTPONLY = True
-CSRF_COOKIE_HTTPONLY = True
-SESSION_COOKIE_SECURE = os.environ.get('COOKIE_SECURE', 'false').lower() == 'true'
-CSRF_COOKIE_SECURE = SESSION_COOKIE_SECURE
-CSRF_TRUSTED_ORIGINS = [origin.strip() for origin in os.environ.get('CSRF_TRUSTED_ORIGINS', '').split(',') if origin.strip()]
 
 MEDIA_URL = 'media/'
 MEDIA_ROOT = BASE_DIR / 'media'
-private_media_path = Path(os.environ.get('EDUFLOW_PRIVATE_MEDIA_ROOT') or (BASE_DIR / 'private_media'))
-if not private_media_path.is_absolute():
-    private_media_path = BASE_DIR / private_media_path
-PRIVATE_MEDIA_ROOT = private_media_path.resolve()
-if PRIVATE_MEDIA_ROOT == MEDIA_ROOT.resolve() or PRIVATE_MEDIA_ROOT.is_relative_to(MEDIA_ROOT.resolve()) or MEDIA_ROOT.resolve().is_relative_to(PRIVATE_MEDIA_ROOT):
-    raise ImproperlyConfigured('EDUFLOW_PRIVATE_MEDIA_ROOT debe quedar fuera de MEDIA_ROOT.')
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
@@ -188,3 +149,5 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+FILE_UPLOAD_MAX_MEMORY_SIZE = 5 * 1024 * 1024
+DATA_UPLOAD_MAX_MEMORY_SIZE = 10 * 1024 * 1024
