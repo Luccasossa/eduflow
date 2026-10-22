@@ -184,11 +184,10 @@ PRIVATE_MEDIA_ROOT = BASE_DIR / "private_media"
 # Email
 MAILERS = {}
 
-# Seguridad para producción
-# Seguridad para producción en Render
+
 if not DEBUG:
     SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
-    SECURE_SSL_REDIRECT = True
+    SECURE_SSL_REDIRECT = False
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
 
@@ -213,3 +212,4 @@ if not DEBUG:
         },
     },
 }
+
