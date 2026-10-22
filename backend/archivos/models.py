@@ -1,6 +1,9 @@
 from django.db import models
 from django.conf import settings
 
+def ruta_archivo_segura(instance, filename):
+    return f"archivos/{filename}"
+
 class Carpeta(models.Model):
     nombre = models.CharField(max_length=150)
 
