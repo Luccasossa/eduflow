@@ -99,6 +99,20 @@ WSGI_APPLICATION = 'config.wsgi.application'
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
+# Ruta del certificado SSL de Aiven
+DB_SSL_CA = os.getenv("DB_SSL_CA", "").strip()
+
+if not DB_SSL_CA:
+    DB_SSL_CA = str(BASE_DIR / "certificados" / "ca (2).pem")
+elif not os.path.isabs(DB_SSL_CA):
+    DB_SSL_CA = str(BASE_DIR / DB_SSL_CA)
+
+
+DB_SSL_CA = os.getenv(
+    "DB_SSL_CA",
+    str(BASE_DIR / "certificados" / "ca (2).pem")
+)
+
 
 DATABASES = {
     "default": {
@@ -112,12 +126,11 @@ DATABASES = {
             "charset": "utf8mb4",
             "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",
             "ssl": {
-                "ca": os.getenv("DB_SSL_CA"),
+                "ca": DB_SSL_CA,
             },
         },
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators

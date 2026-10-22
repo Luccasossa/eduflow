@@ -47,6 +47,9 @@ def registro_view(request):
                 PerfilUsuario.objects.create(usuario=usuario, rol="alumno")
         except IntegrityError:
             form.add_error("dni", "El DNI o el correo ya están registrados.")
+        except Exception:
+            logger.exception("Error inesperado al registrar usuario en EduFlow")
+            raise     
         else:
             messages.success(request, "Tu cuenta se creó correctamente. Ya puedes iniciar sesión.")
             return redirect("usuarios:login")
