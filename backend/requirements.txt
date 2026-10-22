@@ -7,3 +7,4 @@ tzdata == 2026.5
 python-dotenv==1.2.4
 
 gunicorn
+whitenoise==6.12.0

@@ -63,6 +63,7 @@ INSTALLED_APPS = [
 # Aplicaciones de EduFlow las de arriba
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -155,14 +156,13 @@ USE_TZ = True
 
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
-
 STATICFILES_DIRS = [
-    BASE_DIR / 'static',
+    BASE_DIR / "static",
 ]
 
-MEDIA_URL = 'media/'
-MEDIA_ROOT = BASE_DIR / 'media'
-PRIVATE_MEDIA_ROOT = BASE_DIR / 'private_media'
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+PRIVATE_MEDIA_ROOT = BASE_DIR / "private_media"
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
