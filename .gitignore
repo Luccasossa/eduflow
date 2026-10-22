@@ -5,3 +5,7 @@ venv/
 .venv/
 __pycache__/
 *.pyc
+# Respaldos locales de archivos
+media_respaldo_*/
+private_media_respaldo_*/
+*.bak
