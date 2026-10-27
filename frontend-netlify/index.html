@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+    <title>EduFlow - Plataforma Académica</title>
+
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
+</head>
+
+<body data-grade-max="{{ calificacion_maxima }}">
+
+    <!-- BARRA LATERAL -->
+
+    <aside class="sidebar">
+
+    <div class="logo">
+    <img src="{% static 'imagen/WhatsApp Image 2026-09-14 at 7.32.01 PM.jpeg' %}" alt="EduFlow" class="logo-image">
+
+    <div class="logo-text">
+        <strong>EduFlow</strong>
+        <span>Plataforma académica</span>
+    </div>
+</div>
+        <nav>
+
+            <a href="#" class="nav-item active" data-section="inicio">
+                <span>🏠</span>
+                Inicio
+            </a>
+
+            <a href="#" class="nav-item" data-section="tareas">
+                <span>📋</span>
+                Tareas
+            </a>
+
+            <a href="#" class="nav-item" data-section="proyectos">
+                <span>📊</span>
+                Proyectos
+            </a>
+
+            <a href="#" class="nav-item" data-section="archivos">
+                <span>📁</span>
+                Archivos
+            </a>
+
+            <a href="#" class="nav-item" data-section="documentos">
+                <span>📝</span>
+                Documentos
+            </a>
+
+        </nav>
+
+<div class="sidebar-bottom">
+
+    <!-- CONFIGURACIÓN -->
+
+    <div class="sidebar-option" id="settingsBtn">
+
+        <div class="sidebar-option-icon settings-icon">
+            ⚙️
+        </div>
+
+        <div class="sidebar-option-text">
+            <strong>Configuración</strong>
+            <span>Personalizá tu experiencia</span>
+        </div>
+
+        <div class="sidebar-option-arrow">
+            →
+        </div>
+
+    </div>
+
+    <!-- MODO OSCURO -->
+
+    <div class="dark-mode-card">
+
+        <div class="dark-mode-left">
+
+            <div class="dark-mode-icon">
+                🌙
+            </div>
+
+            <div>
+                <strong>Modo oscuro</strong>
+                <span>Activar tema oscuro</span>
+            </div>
+
+        </div>
+
+        <label class="switch">
+
+            <input type="checkbox" id="darkModeSwitch">
+
+            <span class="slider"></span>
+
+        </label>
+
+    </div>
+
+</div>
+
+    <form action="{% url 'usuarios:logout' %}" method="post" class="logout-form">
+        {% csrf_token %}
+        <button type="submit" class="nav-item">Cerrar sesión</button>
+    </form>
+
+    </aside>
+
+
+    <!-- CONTENIDO PRINCIPAL -->
+
+    <main class="main">
+
+        <!-- HEADER -->
+
+        <header class="header">
+
+            <div>
+                <h1 id="page-title">Inicio</h1>
+                <p>Organizá tus actividades académicas en un solo lugar.</p>
+            </div>
+
+            <div class="header-right">
+
+                <button class="icon-button" id="notificationBtn">
+                    🔔
+                    <span class="notification-dot"></span>
+                </button>
+
+                <button class="theme-button" id="themeBtn">
+                    🌙
+                </button>
+
+                <div class="profile">
+
+                    <div class="avatar">
+                        {{ user.first_name|default:user.dni|slice:":2" }}
+                    </div>
+
+                    <div>
+                        <strong>{{ user.get_full_name|default:user.dni }}</strong>
+                        <small>Alumno</small>
+                    </div>
+
+                </div>
+
+            </div>
+
+        </header>
+
+
+        <!-- SECCIÓN INICIO -->
+
+        <section id="inicio" class="section active-section">
+
+            <div class="welcome-card">
+
+                <div>
+
+                    <span class="welcome-label">
+                        👋 Bienvenido nuevamente
+                    </span>
+
+                    <h2>
+                        Hola, {{ user.first_name|default:user.dni }}
+                    </h2>
+
+                    <p id="taskSummaryText">Carga tus tareas pendientes y proyectos grupales.</p>
+
+                    <button class="primary-button" data-new-task>
+                        + Nueva tarea
+                    </button>
+
+                </div>
+
+                <div class="welcome-decoration">
+                    📚
+                </div>
+
+            </div>
+
+ 
+<!-- ACCESOS RÁPIDOS -->
+
+<div class="quick-access">
+
+    <div class="quick-card" data-section="tareas">
+
+        <div class="quick-icon tasks-icon">
+            📋
+        </div>
+
+        <div class="quick-content">
+            <h3>Tareas</h3>
+            <p id="taskCountText">Cargando tareas…</p>
+        </div>
+
+        <span class="quick-arrow">→</span>
+
+    </div>
+
+
+    <div class="quick-card" data-section="proyectos">
+
+        <div class="quick-icon projects-icon">
+            📊
+        </div>
+
+        <div class="quick-content">
+            <h3>Proyectos</h3>
+            <p id="projectCountText">Cargando proyectos…</p>
+        </div>
+
+        <span class="quick-arrow">→</span>
+
+    </div>
+
+
+    <div class="quick-card" data-section="archivos">
+
+        <div class="quick-icon files-icon">
+            📁
+        </div>
+
+        <div class="quick-content">
+            <h3>Archivos</h3>
+            <p>Consulta tus recursos académicos</p>
+        </div>
+
+        <span class="quick-arrow">→</span>
+
+    </div>
+
+
+    <div class="quick-card" data-section="documentos">
+
+        <div class="quick-icon documents-icon">
+            📝
+        </div>
+
+        <div class="quick-content">
+            <h3>Documentos</h3>
+            <p>Consulta documentos compartidos</p>
+        </div>
+
+        <span class="quick-arrow">→</span>
+
+    </div>
+
+</div>
+            <!-- CONTENIDO -->
+
+            <div class="dashboard-grid">
+
+                <!-- TAREAS -->
+
+                <div class="panel">
+
+                    <div class="panel-header">
+
+                        <div>
+                            <h3>Próximas tareas</h3>
+                            <p>Tus actividades pendientes</p>
+                        </div>
+
+                        <button class="text-button" id="viewAllTasksBtn" type="button">
+                            Ver todas
+                        </button>
+
+                    </div>
+<div class="task-list" id="upcomingTaskList" aria-live="polite">
+                        <p class="empty-state">Cargando tareas…</p>
+                    </div>
+
+                </div>
+
+
+                <!-- ACTIVIDAD -->
+
+                <div class="panel">
+
+                    <div class="panel-header">
+
+                        <div>
+                            <h3>Actividad reciente</h3>
+                            <p>Últimos cambios</p>
+                        </div>
+
+                    </div>
+
+
+                    <div class="activity">
+
+                        <div class="activity-icon">
+                            📝
+                        </div>
+
+                        <div>
+                            <strong>
+                                Documento actualizado
+                            </strong>
+
+                            <span>
+                                Trabajo de Sistemas Operativos
+                            </span>
+
+                            <small>
+                                Hace 15 minutos
+                            </small>
+                        </div>
+
+                    </div>
+
+
+                    <div class="activity">
+
+                        <div class="activity-icon">
+                            📁
+                        </div>
+
+                        <div>
+                            <strong>
+                                Archivo subido
+                            </strong>
+
+                            <span>
+                                Redes_Trabajo_Final.pdf
+                            </span>
+
+                            <small>
+                                Hace 1 hora
+                            </small>
+                        </div>
+
+                    </div>
+
+
+                    <div class="activity">
+
+                        <div class="activity-icon">
+                            👥
+                        </div>
+
+                        <div>
+                            <strong>
+                                Nuevo miembro
+                            </strong>
+
+                            <span>
+                                Anahi se unió al proyecto
+                            </span>
+
+                            <small>
+                                Hace 3 horas
+                            </small>
+                        </div>
+
+                    </div>
+
+                </div>
+
+            </div>
+
+        </section>
+
+
+        <!-- SECCIÓN TAREAS -->
+
+        <section id="tareas" class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Mis tareas</h2>
+                    <p>Organizá tus actividades académicas.</p>
+                </div>
+
+                <button class="primary-button" data-new-task>
+                    + Nueva tarea
+                </button>
+
+            </div>
+
+
+            <div class="task-filters">
+                <label>Estado
+                    <select id="filterTaskStatus">
+                        <option value="">Todos</option>
+                        <option value="pendiente">Por hacer</option>
+                        <option value="en_progreso">En proceso</option>
+                        <option value="completada">Finalizado</option>
+                    </select>
+                </label>
+                <label>Prioridad
+                    <select id="filterTaskPriority">
+                        <option value="">Todas</option>
+                        <option value="baja">Baja</option>
+                        <option value="media">Media</option>
+                        <option value="alta">Alta</option>
+                    </select>
+                </label>
+                <label>Desde <input type="date" id="filterTaskFrom"></label>
+                <label>Hasta <input type="date" id="filterTaskTo"></label>
+                <button type="button" class="secondary-button" id="clearTaskFilters">Limpiar</button>
+            </div>
+            <div class="kanban" id="personalKanban" aria-live="polite"></div>
+</section>
+
+
+        <!-- SECCIÓN PROYECTOS -->
+
+        <section id="proyectos" class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Proyectos</h2>
+                    <p>Todos tus proyectos académicos.</p>
+                </div>
+
+                <button class="primary-button" id="newProjectBtn">
+                    + Nuevo proyecto
+                </button>
+
+            </div>
+
+
+            <div class="projects" id="studentProjectList" aria-live="polite"></div>
+</section>
+
+
+        <!-- SECCIÓN ARCHIVOS -->
+
+        <section id="archivos" class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Archivos</h2>
+                    <p>Guardá y organizá tus archivos académicos.</p>
+                </div>
+
+                <button class="primary-button" id="uploadFileBtn" type="button">
+                    ⬆ Subir archivo
+                </button>
+
+            </div>
+
+
+            <div class="storage">
+
+                <div class="storage-info">
+
+                    <span>Almacenamiento utilizado</span>
+
+                    <strong>
+                        <span id="storageUsage">Calculando almacenamiento…</span>
+                    </strong>
+
+                </div>
+
+                <div class="storage-bar">
+                    <div></div>
+                </div>
+
+            </div>
+
+
+            <div class="file-toolbar">
+                <label>Proyecto <select id="fileProjectFilter"><option value="">Todos mis archivos</option></select></label>
+                <label>Carpeta <select id="fileFolderFilter"><option value="">Todas las carpetas</option></select></label>
+                <button type="button" class="secondary-button" id="newFolderBtn">Nueva carpeta</button>
+            </div>
+            <input type="file" id="academicFileInput" accept=".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.txt,.csv" hidden>
+            <div class="file-grid" id="academicFileList" aria-live="polite"></div>
+            <p class="muted">PDF, DOCX, XLSX, PPTX, OpenDocument, TXT y CSV; máximo 15 MB por archivo.</p>
+
+        </section>
+
+
+        <!-- DOCUMENTOS -->
+
+        <section id="documentos" class="section">
+
+            <div class="section-header">
+
+                <div>
+                    <h2>Documentos</h2>
+                    <p>Creá y editá documentos junto a tus compañeros.</p>
+                </div>
+
+                <button class="primary-button" id="newDocumentBtn" type="button">
+                    + Nuevo documento
+                </button>
+
+            </div>
+
+
+            <div class="document-list" id="academicDocumentList" aria-live="polite"></div>
+
+        </section>
+
+    </main>
+
+
+    <!-- MODAL NUEVA TAREA -->
+
+    <div class="modal-overlay" id="taskModal">
+
+        <div class="modal">
+
+            <button class="close-modal" id="closeModal">
+                ×
+            </button>
+
+            <h2 id="taskModalTitle">Nueva tarea</h2>
+            <p>Tu tarea se guardará en tu cuenta.</p>
+            <label for="taskInput">Título</label>
+            <input type="text" id="taskInput" maxlength="150" required>
+            <label for="taskDescription">Descripción</label>
+            <textarea id="taskDescription" maxlength="20000" rows="3"></textarea>
+            <label for="taskDueDate">Fecha de entrega</label>
+            <input type="date" id="taskDueDate">
+            <label for="priorityInput">Prioridad</label>
+            <select id="priorityInput">
+                <option value="baja">Baja</option>
+                <option value="media" selected>Media</option>
+                <option value="alta">Alta</option>
+            </select>
+            <label for="taskStateInput">Estado</label>
+            <select id="taskStateInput">
+                <option value="pendiente">Por hacer</option>
+                <option value="en_progreso">En proceso</option>
+                <option value="completada">Finalizado</option>
+            </select>
+            <p id="taskFormError" class="form-error" role="alert"></p>
+            <div class="modal-actions">
+                <button type="button" class="danger-button" id="deleteTaskBtn" hidden>Eliminar</button>
+                <span></span>
+                <button type="button" class="secondary-button" id="closeModal">Cancelar</button>
+                <button type="button" class="primary-button" id="saveTask">Guardar</button>
+            </div>
+
+        </div>
+
+    </div>
+
+
+    <div class="modal-overlay" id="projectModal" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">
+        <div class="modal">
+            <button type="button" class="close-modal" data-close-project aria-label="Cerrar">×</button>
+            <h2 id="projectModalTitle">Nuevo proyecto</h2>
+            <label for="projectNameInput">Nombre</label>
+            <input type="text" id="projectNameInput" maxlength="150" required>
+            <label for="projectDescriptionInput">Descripción</label>
+            <textarea id="projectDescriptionInput" maxlength="10000" rows="3"></textarea>
+            <label for="projectDueDateInput">Fecha de entrega</label>
+            <input type="date" id="projectDueDateInput">
+            <label for="projectMembersInput">Integrantes</label>
+            <select id="projectMembersInput" multiple size="5" aria-describedby="projectMembersHelp"></select>
+            <small id="projectMembersHelp">Mantén Ctrl (Windows) o ⌘ (Mac) para seleccionar varios alumnos.</small>
+            <p id="projectFormError" class="form-error" role="alert"></p>
+            <div class="modal-actions">
+                <button type="button" class="danger-button" id="deleteProjectBtn" hidden>Eliminar</button>
+                <span></span>
+                <button type="button" class="secondary-button" data-close-project>Cancelar</button>
+                <button type="button" class="primary-button" id="saveProjectBtn">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="modal-overlay" id="documentModal" role="dialog" aria-modal="true" aria-labelledby="documentModalTitle">
+        <div class="modal document-editor">
+            <button type="button" class="close-modal" data-close-document aria-label="Cerrar">×</button>
+            <h2 id="documentModalTitle">Nuevo documento</h2>
+            <label for="documentTitleInput">Título</label>
+            <input id="documentTitleInput" type="text" maxlength="200" required>
+            <label for="documentProjectInput">Proyecto (opcional)</label>
+            <select id="documentProjectInput"><option value="">Documento personal</option></select>
+            <label for="documentContentInput">Contenido</label>
+            <textarea id="documentContentInput" rows="14" maxlength="1000000"></textarea>
+            <p id="documentFormError" class="form-error" role="alert"></p>
+            <div id="documentConflict" class="document-conflict" hidden>
+                <strong>Hay una versión guardada más reciente.</strong>
+                <p>Compara el contenido actual con tu borrador, combínalos en el editor y luego confirma el guardado.</p>
+                <pre id="documentConflictContent"></pre>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="danger-button" id="deleteDocumentBtn" hidden>Eliminar</button>
+                <span id="documentVersionLabel"></span>
+                <button type="button" class="secondary-button" data-close-document>Cerrar</button>
+                <button type="button" class="primary-button" id="saveDocumentBtn">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{% static 'js/app.js' %}"></script>
+
+</body>
+
+</html>

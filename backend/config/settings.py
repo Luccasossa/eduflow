@@ -10,22 +10,38 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/6.1/ref/settings/
 """
 
-from pathlib import Path
 
-# Build paths inside the project like this: BASE_DIR / 'subdir'.
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Load environment variables from backend/.env
+load_dotenv(BASE_DIR / ".env")
 
 
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/6.1/howto/deployment/checklist/
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-e4g3s7gst-__slszzwxn^$+h7xnb2z)#y^58%v^=4f&ew=p4a4'
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+SECRET_KEY = os.getenv("DJANGO_SECRET_KEY", "")
+DEBUG = os.getenv("DJANGO_DEBUG", "false").lower() == "true"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    host.strip()
+    for host in os.getenv(
+        "DJANGO_ALLOWED_HOSTS", "localhost,127.0.0.1"
+    ).split(",")
+    if host.strip()
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    origin.strip()
+    for origin in os.getenv("CSRF_TRUSTED_ORIGINS", "").split(",")
+    if origin.strip()
+]
 
 
 # Application definition
@@ -47,6 +63,7 @@ INSTALLED_APPS = [
 # Aplicaciones de EduFlow las de arriba
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
@@ -78,13 +95,42 @@ WSGI_APPLICATION = 'config.wsgi.application'
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
 
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
+
+# Ruta del certificado SSL de Aiven
+DB_SSL_CA = os.getenv("DB_SSL_CA", "").strip()
+
+if not DB_SSL_CA:
+    DB_SSL_CA = str(BASE_DIR / "certificados" / "ca (2).pem")
+elif not os.path.isabs(DB_SSL_CA):
+    DB_SSL_CA = str(BASE_DIR / DB_SSL_CA)
+
+
+DB_SSL_CA = os.getenv(
+    "DB_SSL_CA",
+    str(BASE_DIR / "certificados" / "ca (2).pem")
+)
+
+
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+    "default": {
+        "ENGINE": "django.db.backends.mysql",
+        "NAME": os.getenv("DB_NAME"),
+        "USER": os.getenv("DB_USER"),
+        "PASSWORD": os.getenv("DB_PASSWORD"),
+        "HOST": os.getenv("DB_HOST"),
+        "PORT": os.getenv("DB_PORT"),
+        "OPTIONS": {
+            "charset": "utf8mb4",
+            "init_command": "SET sql_mode='STRICT_TRANS_TABLES'",
+            "ssl": {
+                "ca": DB_SSL_CA,
+            },
+        },
     }
 }
-
 
 # Password validation
 # https://docs.djangoproject.com/en/6.1/ref/settings/#auth-password-validators
@@ -121,20 +167,54 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/6.1/howto/static-files/
 
-STATIC_URL = 'static/'
-
+STATIC_URL = "/static/"
+STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [
-    BASE_DIR / 'static',
+    BASE_DIR / "static",
 ]
 
-MEDIA_URL = 'media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+MEDIA_URL = "/media/"
+MEDIA_ROOT = BASE_DIR / "media"
+PRIVATE_MEDIA_ROOT = BASE_DIR / "private_media"
 
 # Email
 # https://docs.djangoproject.com/en/6.1/topics/email/#topic-email-configuration
 
-MAILERS = {
-    'default': {
-        'BACKEND': 'django.core.mail.backends.console.EmailBackend',
+
+# Email
+MAILERS = {}
+
+
+if not DEBUG:
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+    SECURE_SSL_REDIRECT = False
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
+
+    LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "handlers": {
+        "console": {
+            "class": "logging.StreamHandler",
+        },
+    },
+    "root": {
+        "handlers": ["console"],
+        "level": "INFO",
+    },
+    "loggers": {
+        "usuarios.views": {
+            "handlers": ["console"],
+            "level": "ERROR",
+            "propagate": False,
+        },
     },
 }
+
+LOGIN_URL = "/usuarios/login/"
+LOGIN_REDIRECT_URL = "/"
+LOGOUT_REDIRECT_URL = "/usuarios/login/"
+
+EDUFLOW_GRADE_MAX = 10

@@ -1,6 +1,9 @@
 from django.db import models
 from django.conf import settings
 
+def ruta_archivo_segura(instance, filename):
+    return f"archivos/{filename}"
+
 class Carpeta(models.Model):
     nombre = models.CharField(max_length=150)
 
@@ -44,6 +47,15 @@ class Archivo(models.Model):
     # NUEVO: relación opcional con un proyecto
     proyecto = models.ForeignKey(
         "proyectos.Proyecto",
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="archivos"
+    )
+
+     # NUEVO C: relación opcional;cada archivo podrá estar asociado opcionalmente a un proyecto o a una tarea
+    tarea = models.ForeignKey(
+        "tareas.Tarea",
         on_delete=models.SET_NULL,
         null=True,
         blank=True,

@@ -41,6 +41,7 @@ class Documento(models.Model):
     )
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     fecha_actualizacion = models.DateTimeField(auto_now=True)
+    version = models.PositiveIntegerField(default=1)
 
     def __str__(self):
         return self.titulo

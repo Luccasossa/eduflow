@@ -1,0 +1,120 @@
+
+{% load static %}
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EduFlow | Crear cuenta</title>
+    <link rel="stylesheet" href="{% static 'css/registro.css' %}">
+</head>
+<body>
+    <div class="registro-layout">
+
+        <aside class="panel-lateral">
+            <a href="#" class="marca">
+                <img src="{% static 'imagen/WhatsApp Image 2026-09-14 at 7.32.01 PM.jpeg' %}"
+                     alt="Logo de EduFlow">
+                <span>Eduflow</span>
+            </a>
+
+            <div class="mensaje-lateral">
+                <p class="etiqueta">TU ESPACIO PARA CRECER</p>
+                <h2>Aprende, enseña y transforma tu futuro.</h2>
+                <p>
+                    Únete a una comunidad donde el conocimiento
+                    conecta a estudiantes y profesores.
+                </p>
+            </div>
+
+            <p class="pie-lateral">
+                Educación que inspira, comunidad que impulsa.
+            </p>
+        </aside>
+
+        <main class="contenido">
+            <div class="formulario-contenedor">
+
+                <header class="encabezado">
+                    <p class="subtitulo">Empieza hoy</p>
+                    <h1>Crea tu cuenta</h1>
+                    <p class="descripcion">
+                        Completa tus datos para acceder a tu
+                        experiencia educativa.
+                    </p>
+                </header>
+
+                {% if messages %}
+                    <div class="auth-messages" role="status" aria-live="polite">
+                        {% for message in messages %}<p class="auth-message {{ message.tags }}">{{ message }}</p>{% endfor %}
+                    </div>
+                {% endif %}
+
+                <form method="post" action="{% url 'usuarios:registro' %}">
+                    {% csrf_token %}
+
+                    <p class="descripcion">El registro abierto crea cuentas de alumno. Las cuentas docentes las habilita la institución.</p>
+
+                    <div class="fila-campos">
+                        <label>
+                            <span>Nombres</span>
+                            <input class="form-input" type="text"
+                                   name="first_name"
+                                   value="{{ form.first_name.value|default:'' }}"
+                                   placeholder="Ej. Andrea" required>
+                            {{ form.first_name.errors }}
+                        </label>
+
+                        <label>
+                            <span>Apellidos</span>
+                            <input class="form-input" type="text"
+                                   name="last_name"
+                                   value="{{ form.last_name.value|default:'' }}"
+                                   placeholder="Ej. Ramírez López" required>
+                            {{ form.last_name.errors }}
+                        </label>
+                    </div>
+
+                    <label class="campo">
+                        <span>Correo electrónico</span>
+                        <input class="form-input" type="email"
+                               name="email"
+                               value="{{ form.email.value|default:'' }}"
+                               placeholder="nombre@correo.com" required>
+                        {{ form.email.errors }}
+                    </label>
+
+                    <label class="campo">
+                        <span>DNI</span>
+                        <input class="form-input" type="text"
+                               name="dni" inputmode="numeric"
+                               value="{{ form.dni.value|default:'' }}"
+                               placeholder="Ingresa tu número de DNI"
+                               required>
+                        {{ form.dni.errors }}
+                        <small>Usarás tu DNI para iniciar sesión.</small>
+                    </label>
+
+                    <label class="campo">
+                        <span>Contraseña</span>
+                        <input class="form-input" type="password"
+                               name="password"
+                               placeholder="Mínimo 8 caracteres"
+                               minlength="8" required>
+                        {{ form.password.errors }}
+                    </label>
+
+                    <button class="boton-registro" type="submit">
+                        Crear cuenta
+                    </button>
+
+                    <p class="enlace-login">
+                        ¿Ya tienes una cuenta?
+                        <a href="{% url 'usuarios:login' %}">Inicia sesión</a>
+                    </p>
+                </form>
+            </div>
+        </main>
+    </div>
+</body>
+</html>

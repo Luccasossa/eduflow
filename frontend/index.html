@@ -7,17 +7,18 @@
 
     <title>EduFlow - Plataforma Académica</title>
 
-    <link rel="stylesheet" href="css/style.css">
+    {% load static %}
+    <link rel="stylesheet" href="{% static 'css/style.css' %}">
 </head>
 
-<body>
+<body data-grade-max="{{ calificacion_maxima }}">
 
     <!-- BARRA LATERAL -->
 
     <aside class="sidebar">
 
     <div class="logo">
-    <img src="imagen/WhatsApp Image 2026-09-14 at 7.32.01 PM.jpeg" alt="EduFlow" class="logo-image">
+    <img src="{% static 'imagen/WhatsApp Image 2026-09-14 at 7.32.01 PM.jpeg' %}" alt="EduFlow" class="logo-image">
 
     <div class="logo-text">
         <strong>EduFlow</strong>
@@ -50,11 +51,6 @@
                 <span>📝</span>
                 Documentos
             </a>
-
-            <button type="button" class="nav-item role-switch-button" id="teacherViewBtn">
-                <span>🎓</span>
-                Vista docente
-            </button>
 
         </nav>
 
@@ -108,6 +104,11 @@
 
 </div>
 
+    <form action="{% url 'usuarios:logout' %}" method="post" class="logout-form">
+        {% csrf_token %}
+        <button type="submit" class="nav-item">Cerrar sesión</button>
+    </form>
+
     </aside>
 
 
@@ -138,11 +139,11 @@
                 <div class="profile">
 
                     <div class="avatar">
-                        LS
+                        {{ user.first_name|default:user.dni|slice:":2" }}
                     </div>
 
                     <div>
-                        <strong>Lucca Sosa</strong>
+                        <strong>{{ user.get_full_name|default:user.dni }}</strong>
                         <small>Alumno</small>
                     </div>
 
@@ -166,14 +167,12 @@
                     </span>
 
                     <h2>
-                        Hola, Lucca
+                        Hola, {{ user.first_name|default:user.dni }}
                     </h2>
 
-                    <p>
-                        Tenés 4 tareas pendientes y 2 proyectos activos.
-                    </p>
+                    <p id="taskSummaryText">Carga tus tareas pendientes y proyectos grupales.</p>
 
-                    <button class="primary-button" id="newTaskBtn">
+                    <button class="primary-button" data-new-task>
                         + Nueva tarea
                     </button>
 
@@ -198,7 +197,7 @@
 
         <div class="quick-content">
             <h3>Tareas</h3>
-            <p>4 tareas pendientes</p>
+            <p id="taskCountText">Cargando tareas…</p>
         </div>
 
         <span class="quick-arrow">→</span>
@@ -214,7 +213,7 @@
 
         <div class="quick-content">
             <h3>Proyectos</h3>
-            <p>2 proyectos activos</p>
+            <p id="projectCountText">Cargando proyectos…</p>
         </div>
 
         <span class="quick-arrow">→</span>
@@ -230,7 +229,7 @@
 
         <div class="quick-content">
             <h3>Archivos</h3>
-            <p>28 archivos almacenados</p>
+            <p>Consulta tus recursos académicos</p>
         </div>
 
         <span class="quick-arrow">→</span>
@@ -246,7 +245,7 @@
 
         <div class="quick-content">
             <h3>Documentos</h3>
-            <p>7 documentos</p>
+            <p>Consulta documentos compartidos</p>
         </div>
 
         <span class="quick-arrow">→</span>
@@ -269,83 +268,13 @@
                             <p>Tus actividades pendientes</p>
                         </div>
 
-                        <button class="text-button">
+                        <button class="text-button" id="viewAllTasksBtn" type="button">
                             Ver todas
                         </button>
 
                     </div>
-
-
-                    <div class="task-list">
-
-                        <div class="task">
-
-                            <div class="task-check"></div>
-
-                            <div class="task-info">
-
-                                <strong>
-                                    Trabajo práctico de Bases de Datos
-                                </strong>
-
-                                <span>
-                                    📅 Entrega: 10 Septiembre
-                                </span>
-
-                            </div>
-
-                            <span class="priority high">
-                                Alta
-                            </span>
-
-                        </div>
-
-
-                        <div class="task">
-
-                            <div class="task-check"></div>
-
-                            <div class="task-info">
-
-                                <strong>
-                                    Investigación sobre redes
-                                </strong>
-
-                                <span>
-                                    📅 Entrega: 14 Septiembre
-                                </span>
-
-                            </div>
-
-                            <span class="priority medium">
-                                Media
-                            </span>
-
-                        </div>
-
-
-                        <div class="task">
-
-                            <div class="task-check"></div>
-
-                            <div class="task-info">
-
-                                <strong>
-                                    Ejercicios de Python
-                                </strong>
-
-                                <span>
-                                    📅 Entrega: 18 Septiembre
-                                </span>
-
-                            </div>
-
-                            <span class="priority low">
-                                Baja
-                            </span>
-
-                        </div>
-
+<div class="task-list" id="upcomingTaskList" aria-live="polite">
+                        <p class="empty-state">Cargando tareas…</p>
                     </div>
 
                 </div>
@@ -451,112 +380,36 @@
                     <p>Organizá tus actividades académicas.</p>
                 </div>
 
-                <button class="primary-button">
+                <button class="primary-button" data-new-task>
                     + Nueva tarea
                 </button>
 
             </div>
 
 
-            <div class="kanban">
-
-                <div class="kanban-column">
-
-                    <div class="kanban-title">
-                        <span>Por hacer</span>
-                        <b>2</b>
-                    </div>
-
-                    <div class="kanban-card">
-
-                        <strong>
-                            Trabajo de Base de Datos
-                        </strong>
-
-                        <p>
-                            Crear modelo entidad-relación.
-                        </p>
-
-                        <span class="card-date">
-                            📅 10 Septiembre
-                        </span>
-
-                    </div>
-
-
-                    <div class="kanban-card">
-
-                        <strong>
-                            Ejercicios Python
-                        </strong>
-
-                        <p>
-                            Resolver ejercicios de listas.
-                        </p>
-
-                        <span class="card-date">
-                            📅 18 Septiembre
-                        </span>
-
-                    </div>
-
-                </div>
-
-
-                <div class="kanban-column">
-
-                    <div class="kanban-title">
-                        <span>En progreso</span>
-                        <b>1</b>
-                    </div>
-
-                    <div class="kanban-card">
-
-                        <strong>
-                            Proyecto final
-                        </strong>
-
-                        <p>
-                            Desarrollo de la aplicación.
-                        </p>
-
-                        <span class="card-date">
-                            📅 25 Septiembre
-                        </span>
-
-                    </div>
-
-                </div>
-
-
-                <div class="kanban-column">
-
-                    <div class="kanban-title">
-                        <span>Completado</span>
-                        <b>2</b>
-                    </div>
-
-                    <div class="kanban-card completed">
-
-                        <strong>
-                            Investigación de redes
-                        </strong>
-
-                        <p>
-                            Trabajo entregado.
-                        </p>
-
-                        <span class="card-date">
-                            ✓ Completado
-                        </span>
-
-                    </div>
-
-                </div>
-
+            <div class="task-filters">
+                <label>Estado
+                    <select id="filterTaskStatus">
+                        <option value="">Todos</option>
+                        <option value="pendiente">Por hacer</option>
+                        <option value="en_progreso">En proceso</option>
+                        <option value="completada">Finalizado</option>
+                    </select>
+                </label>
+                <label>Prioridad
+                    <select id="filterTaskPriority">
+                        <option value="">Todas</option>
+                        <option value="baja">Baja</option>
+                        <option value="media">Media</option>
+                        <option value="alta">Alta</option>
+                    </select>
+                </label>
+                <label>Desde <input type="date" id="filterTaskFrom"></label>
+                <label>Hasta <input type="date" id="filterTaskTo"></label>
+                <button type="button" class="secondary-button" id="clearTaskFilters">Limpiar</button>
             </div>
-
-        </section>
+            <div class="kanban" id="personalKanban" aria-live="polite"></div>
+</section>
 
 
         <!-- SECCIÓN PROYECTOS -->
@@ -570,75 +423,15 @@
                     <p>Todos tus proyectos académicos.</p>
                 </div>
 
-                <button class="primary-button">
+                <button class="primary-button" id="newProjectBtn">
                     + Nuevo proyecto
                 </button>
 
             </div>
 
 
-            <div class="projects">
-
-                <div class="project-card">
-
-                    <div class="project-icon">
-                        💻
-                    </div>
-
-                    <h3>Proyecto de Software</h3>
-
-                    <p>
-                        Desarrollo de plataforma académica.
-                    </p>
-
-                    <div class="progress">
-
-                        <div class="progress-bar">
-                            <div style="width: 70%"></div>
-                        </div>
-
-                        <span>70%</span>
-
-                    </div>
-
-                    <div class="project-members">
-                        👤 👤 👤 +2
-                    </div>
-
-                </div>
-
-
-                <div class="project-card">
-
-                    <div class="project-icon">
-                        🗄️
-                    </div>
-
-                    <h3>Base de Datos</h3>
-
-                    <p>
-                        Sistema de gestión de estudiantes.
-                    </p>
-
-                    <div class="progress">
-
-                        <div class="progress-bar">
-                            <div style="width: 45%"></div>
-                        </div>
-
-                        <span>45%</span>
-
-                    </div>
-
-                    <div class="project-members">
-                        👤 👤 +1
-                    </div>
-
-                </div>
-
-            </div>
-
-        </section>
+            <div class="projects" id="studentProjectList" aria-live="polite"></div>
+</section>
 
 
         <!-- SECCIÓN ARCHIVOS -->
@@ -652,7 +445,7 @@
                     <p>Guardá y organizá tus archivos académicos.</p>
                 </div>
 
-                <button class="primary-button">
+                <button class="primary-button" id="uploadFileBtn" type="button">
                     ⬆ Subir archivo
                 </button>
 
@@ -666,7 +459,7 @@
                     <span>Almacenamiento utilizado</span>
 
                     <strong>
-                        4.2 GB / 15 GB
+                        <span id="storageUsage">Calculando almacenamiento…</span>
                     </strong>
 
                 </div>
@@ -678,33 +471,14 @@
             </div>
 
 
-            <div class="file-grid">
-
-                <div class="file-card">
-                    <div class="file-icon pdf">PDF</div>
-                    <strong>Trabajo_Redes.pdf</strong>
-                    <span>2.4 MB</span>
-                </div>
-
-                <div class="file-card">
-                    <div class="file-icon word">DOC</div>
-                    <strong>Informe_Final.docx</strong>
-                    <span>1.8 MB</span>
-                </div>
-
-                <div class="file-card">
-                    <div class="file-icon excel">XLS</div>
-                    <strong>Notas.xlsx</strong>
-                    <span>850 KB</span>
-                </div>
-
-                <div class="file-card">
-                    <div class="file-icon folder">📁</div>
-                    <strong>Trabajos prácticos</strong>
-                    <span>12 archivos</span>
-                </div>
-
+            <div class="file-toolbar">
+                <label>Proyecto <select id="fileProjectFilter"><option value="">Todos mis archivos</option></select></label>
+                <label>Carpeta <select id="fileFolderFilter"><option value="">Todas las carpetas</option></select></label>
+                <button type="button" class="secondary-button" id="newFolderBtn">Nueva carpeta</button>
             </div>
+            <input type="file" id="academicFileInput" accept=".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.txt,.csv" hidden>
+            <div class="file-grid" id="academicFileList" aria-live="polite"></div>
+            <p class="muted">PDF, DOCX, XLSX, PPTX, OpenDocument, TXT y CSV; máximo 15 MB por archivo.</p>
 
         </section>
 
@@ -720,65 +494,14 @@
                     <p>Creá y editá documentos junto a tus compañeros.</p>
                 </div>
 
-                <button class="primary-button">
+                <button class="primary-button" id="newDocumentBtn" type="button">
                     + Nuevo documento
                 </button>
 
             </div>
 
 
-            <div class="document-list">
-
-                <div class="document-card">
-
-                    <div class="document-icon">
-                        📝
-                    </div>
-
-                    <div>
-
-                        <strong>
-                            Trabajo Práctico - Sistemas
-                        </strong>
-
-                        <span>
-                            Editado hace 10 minutos
-                        </span>
-
-                    </div>
-
-                    <div class="collaborators">
-                        👤 👤 👤
-                    </div>
-
-                </div>
-
-
-                <div class="document-card">
-
-                    <div class="document-icon">
-                        📝
-                    </div>
-
-                    <div>
-
-                        <strong>
-                            Proyecto Final
-                        </strong>
-
-                        <span>
-                            Editado ayer
-                        </span>
-
-                    </div>
-
-                    <div class="collaborators">
-                        👤 👤
-                    </div>
-
-                </div>
-
-            </div>
+            <div class="document-list" id="academicDocumentList" aria-live="polite"></div>
 
         </section>
 
@@ -795,51 +518,88 @@
                 ×
             </button>
 
-            <h2>Nueva tarea</h2>
-
-            <p>
-                Agregá una nueva actividad académica.
-            </p>
-
-            <input
-                type="text"
-                id="taskInput"
-                placeholder="Nombre de la tarea"
-            >
-
+            <h2 id="taskModalTitle">Nueva tarea</h2>
+            <p>Tu tarea se guardará en tu cuenta.</p>
+            <label for="taskInput">Título</label>
+            <input type="text" id="taskInput" maxlength="150" required>
+            <label for="taskDescription">Descripción</label>
+            <textarea id="taskDescription" maxlength="20000" rows="3"></textarea>
+            <label for="taskDueDate">Fecha de entrega</label>
+            <input type="date" id="taskDueDate">
+            <label for="priorityInput">Prioridad</label>
             <select id="priorityInput">
-
-                <option value="Alta">
-                    Alta
-                </option>
-
-                <option value="Media">
-                    Media
-                </option>
-
-                <option value="Baja">
-                    Baja
-                </option>
-
+                <option value="baja">Baja</option>
+                <option value="media" selected>Media</option>
+                <option value="alta">Alta</option>
             </select>
-
-            <button class="primary-button" id="saveTask">
-                Crear tarea
-            </button>
+            <label for="taskStateInput">Estado</label>
+            <select id="taskStateInput">
+                <option value="pendiente">Por hacer</option>
+                <option value="en_progreso">En proceso</option>
+                <option value="completada">Finalizado</option>
+            </select>
+            <p id="taskFormError" class="form-error" role="alert"></p>
+            <div class="modal-actions">
+                <button type="button" class="danger-button" id="deleteTaskBtn" hidden>Eliminar</button>
+                <span></span>
+                <button type="button" class="secondary-button" id="closeModal">Cancelar</button>
+                <button type="button" class="primary-button" id="saveTask">Guardar</button>
+            </div>
 
         </div>
 
     </div>
 
 
-    <iframe
-        id="teacherFrame"
-        class="teacher-frame"
-        src="eduflow-todo-en-uno%20(1).html"
-        title="Vista docente de EduFlow"
-    ></iframe>
+    <div class="modal-overlay" id="projectModal" role="dialog" aria-modal="true" aria-labelledby="projectModalTitle">
+        <div class="modal">
+            <button type="button" class="close-modal" data-close-project aria-label="Cerrar">×</button>
+            <h2 id="projectModalTitle">Nuevo proyecto</h2>
+            <label for="projectNameInput">Nombre</label>
+            <input type="text" id="projectNameInput" maxlength="150" required>
+            <label for="projectDescriptionInput">Descripción</label>
+            <textarea id="projectDescriptionInput" maxlength="10000" rows="3"></textarea>
+            <label for="projectDueDateInput">Fecha de entrega</label>
+            <input type="date" id="projectDueDateInput">
+            <label for="projectMembersInput">Integrantes</label>
+            <select id="projectMembersInput" multiple size="5" aria-describedby="projectMembersHelp"></select>
+            <small id="projectMembersHelp">Mantén Ctrl (Windows) o ⌘ (Mac) para seleccionar varios alumnos.</small>
+            <p id="projectFormError" class="form-error" role="alert"></p>
+            <div class="modal-actions">
+                <button type="button" class="danger-button" id="deleteProjectBtn" hidden>Eliminar</button>
+                <span></span>
+                <button type="button" class="secondary-button" data-close-project>Cancelar</button>
+                <button type="button" class="primary-button" id="saveProjectBtn">Guardar</button>
+            </div>
+        </div>
+    </div>
 
-    <script src="js/app.js"></script>
+    <div class="modal-overlay" id="documentModal" role="dialog" aria-modal="true" aria-labelledby="documentModalTitle">
+        <div class="modal document-editor">
+            <button type="button" class="close-modal" data-close-document aria-label="Cerrar">×</button>
+            <h2 id="documentModalTitle">Nuevo documento</h2>
+            <label for="documentTitleInput">Título</label>
+            <input id="documentTitleInput" type="text" maxlength="200" required>
+            <label for="documentProjectInput">Proyecto (opcional)</label>
+            <select id="documentProjectInput"><option value="">Documento personal</option></select>
+            <label for="documentContentInput">Contenido</label>
+            <textarea id="documentContentInput" rows="14" maxlength="1000000"></textarea>
+            <p id="documentFormError" class="form-error" role="alert"></p>
+            <div id="documentConflict" class="document-conflict" hidden>
+                <strong>Hay una versión guardada más reciente.</strong>
+                <p>Compara el contenido actual con tu borrador, combínalos en el editor y luego confirma el guardado.</p>
+                <pre id="documentConflictContent"></pre>
+            </div>
+            <div class="modal-actions">
+                <button type="button" class="danger-button" id="deleteDocumentBtn" hidden>Eliminar</button>
+                <span id="documentVersionLabel"></span>
+                <button type="button" class="secondary-button" data-close-document>Cerrar</button>
+                <button type="button" class="primary-button" id="saveDocumentBtn">Guardar</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="{% static 'js/app.js' %}"></script>
 
 </body>
 

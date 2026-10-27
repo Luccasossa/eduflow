@@ -1,0 +1,323 @@
+
+/* Configuración general */
+* {
+    box-sizing: border-box;
+}
+
+html {
+    color-scheme: light;
+}
+
+body {
+    margin: 0;
+    min-width: 320px;
+    min-height: 100vh;
+    background: #F8FAFC;
+    color: #1E293B;
+    font-family: Inter, "Segoe UI", Arial, sans-serif;
+    -webkit-font-smoothing: antialiased;
+}
+
+button {
+    font: inherit;
+}
+
+a {
+    color: inherit;
+    text-decoration: none;
+}
+
+/* Distribución principal */
+.logout-layout {
+    display: grid;
+    grid-template-columns: 46% 54%;
+    min-height: 100vh;
+}
+
+/* Panel lateral */
+.welcome-panel {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 100vh;
+    padding: 40px 64px;
+    overflow: hidden;
+    background: #1E293B;
+    color: #FFFFFF;
+}
+
+/* Marca EduFlow */
+.brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 12px;
+    width: fit-content;
+    color: #1E293B;
+    font-size: 26px;
+    font-weight: 700;
+    letter-spacing: -0.5px;
+}
+
+.brand-light {
+    color: #FFFFFF;
+}
+
+.brand-logo {
+    width: 48px;
+    height: 48px;
+    padding: 4px;
+    border-radius: 12px;
+    background: #FFFFFF;
+    object-fit: contain;
+    box-shadow: 0 2px 5px rgb(0 0 0 / 10%);
+}
+
+/* Mensaje lateral */
+.welcome-content {
+    width: 100%;
+    max-width: 400px;
+    margin: auto 0;
+    padding: 48px 0;
+}
+
+.eyebrow {
+    margin: 0 0 12px;
+    color: #FB923C;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+}
+
+.welcome-content h2 {
+    margin: 0;
+    color: #FFFFFF;
+    font-size: 38px;
+    font-weight: 700;
+    line-height: 1.2;
+    letter-spacing: -1px;
+}
+
+.welcome-description {
+    max-width: 370px;
+    margin: 18px 0 0;
+    color: #CBD5E1;
+    font-size: 16px;
+    line-height: 1.8;
+}
+
+.panel-footer {
+    margin: 0;
+    color: #94A3B8;
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+/* Área principal */
+.logout-main {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 100vh;
+    padding: 40px 48px;
+}
+
+.logout-container {
+    width: 100%;
+    max-width: 480px;
+}
+
+.mobile-brand {
+    display: none;
+}
+
+/* Tarjeta de confirmación */
+.logout-card {
+    padding: 36px;
+    border: 1px solid #E2E8F0;
+    border-radius: 16px;
+    background: #FFFFFF;
+    box-shadow: 0 20px 50px rgb(15 23 42 / 8%);
+}
+
+/* Ícono de salida */
+.logout-icon {
+    display: grid;
+    place-items: center;
+    width: 56px;
+    height: 56px;
+    margin-bottom: 24px;
+    border-radius: 16px;
+    background: #FFF7ED;
+    color: #EA580C;
+}
+
+.logout-icon svg {
+    width: 28px;
+    height: 28px;
+}
+
+/* Textos */
+.section-label {
+    margin: 0 0 8px;
+    color: #EA580C;
+    font-size: 14px;
+    font-weight: 700;
+}
+
+.logout-card h1 {
+    margin: 0;
+    color: #1E293B;
+    font-size: 32px;
+    font-weight: 750;
+    line-height: 1.2;
+    letter-spacing: -0.8px;
+}
+
+.logout-description {
+    margin: 14px 0 0;
+    color: #6B7280;
+    font-size: 16px;
+    line-height: 1.75;
+}
+
+/* Botones */
+.logout-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 32px;
+}
+
+.button {
+    flex: 1;
+    min-width: 0;
+    padding: 14px 16px;
+    border: 1px solid transparent;
+    border-radius: 12px;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.4;
+    cursor: pointer;
+    transition:
+        background 150ms ease,
+        border-color 150ms ease,
+        transform 150ms ease;
+}
+
+/* Botón para continuar */
+.button-secondary {
+    border-color: #CBD5E1;
+    background: #FFFFFF;
+    color: #334155;
+}
+
+.button-secondary:hover {
+    border-color: #94A3B8;
+    background: #F8FAFC;
+}
+
+/* Botón para cerrar sesión */
+.button-primary {
+    background: #EA580C;
+    color: #FFFFFF;
+    box-shadow: 0 8px 20px rgb(234 88 12 / 20%);
+}
+
+.button-primary:hover {
+    background: #C2410C;
+}
+
+.button:focus-visible {
+    outline: 3px solid #FDBA74;
+    outline-offset: 3px;
+}
+
+.button:active {
+    transform: translateY(1px);
+}
+
+/* Mensaje inferior */
+.session-note {
+    margin: 24px 0 0;
+    color: #6B7280;
+    font-size: 14px;
+    line-height: 1.6;
+    text-align: center;
+}
+
+/* Tablets y pantallas pequeñas */
+@media (max-width: 1023px) {
+    .logout-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .welcome-panel {
+        display: none;
+    }
+
+    .logout-main {
+        padding: 40px 32px;
+    }
+
+    .mobile-brand {
+        display: block;
+        margin-bottom: 48px;
+    }
+}
+
+/* Celulares */
+@media (max-width: 560px) {
+    .logout-main {
+        align-items: flex-start;
+        padding: 28px 20px;
+    }
+
+    .mobile-brand {
+        margin-bottom: 36px;
+    }
+
+    .brand {
+        font-size: 24px;
+    }
+
+    .brand-logo {
+        width: 44px;
+        height: 44px;
+    }
+
+    .logout-card {
+        padding: 26px 22px;
+        border-radius: 16px;
+    }
+
+    .logout-card h1 {
+        font-size: 29px;
+    }
+
+    .logout-description {
+        font-size: 15px;
+    }
+
+    .logout-actions {
+        flex-direction: column-reverse;
+    }
+
+    .button {
+        width: 100%;
+        padding: 14px 16px;
+    }
+
+    .session-note {
+        font-size: 13px;
+    }
+}
+
+/* Preferencias de movimiento reducido */
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+    }
+}
