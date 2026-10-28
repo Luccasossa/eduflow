@@ -52,8 +52,13 @@ class DocumentosTests(TestCase):
         self.assertEqual(response.status_code, 201)
         documento = Documento.objects.get()
         self.assertTrue(documento.colaboradores.filter(pk=self.comp.pk).exists())
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.post_json(reverse("api_documentos"), {
+            "titulo": "Intruso", "proyecto": proyecto.id,
+        }).status_code, 404)
         self.client.force_login(self.comp)
         url = reverse("api_documento", args=[documento.id])
+        self.assertEqual(self.client.delete(url).status_code, 403)
         response = self.client.patch(url, data=json.dumps({"contenido": "B", "version": 1}), content_type="application/json")
         self.assertEqual(response.status_code, 200)
         self.client.force_login(self.ajeno)
@@ -87,11 +92,21 @@ class DocumentosTests(TestCase):
         proyecto = Proyecto.objects.create(nombre="Equipo", creador=self.alumno)
         proyecto.profesores.add(self.profesor)
         proyecto.integrantes.add(self.alumno, self.comp)
-        documento = Documento.objects.create(titulo="Compartido", contenido="Texto", creador=self.alumno, proyecto=proyecto)
+        documento = Documento.objects.create(titulo="Compartido", contenido="Texto", creador=self.comp, proyecto=proyecto)
         documento.colaboradores.add(self.comp)
         proyecto.integrantes.remove(self.comp)
         self.client.force_login(self.comp)
         self.assertEqual(self.client.get(reverse("api_documento", args=[documento.id])).status_code, 404)
+        self.assertNotIn(documento.id, [item["id"] for item in self.client.get(reverse("api_documentos")).json()["documentos"]])
+
+    def test_docente_pierde_listado_y_acceso_si_revocan_su_asignacion(self):
+        proyecto = Proyecto.objects.create(nombre="Equipo", creador=self.alumno)
+        proyecto.profesores.add(self.profesor)
+        documento = Documento.objects.create(titulo="De cátedra", creador=self.profesor, proyecto=proyecto)
+        proyecto.profesores.remove(self.profesor)
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(reverse("api_documento", args=[documento.pk])).status_code, 404)
+        self.assertNotIn(documento.pk, [item["id"] for item in self.client.get(reverse("api_documentos")).json()["documentos"]])
 
     def test_profesor_persiste_retroalimentacion_solo_en_documentos_grupales(self):
         proyecto = Proyecto.objects.create(nombre="Equipo", creador=self.alumno)
@@ -147,6 +162,30 @@ class DocumentosTests(TestCase):
             self.client.get(reverse("api_documento", args=[documento.pk])).json()["documento"]["calificacion"],
             "9.25",
         )
+
+    def test_rechaza_tipo_titulo_proyecto_y_version_invalidos(self):
+        self.client.force_login(self.alumno)
+        for titulo in (None, 42, {"mal": "tipo"}):
+            response = self.post_json(reverse("api_documentos"), {"titulo": titulo, "contenido": "Texto"})
+            self.assertEqual(response.status_code, 400)
+        for bad_payload in (
+            {"titulo": "T" * 201, "contenido": "Texto"},
+            {"titulo": "Texto", "contenido": 42},
+            {"titulo": "Texto", "contenido": "x" * 1_000_001},
+        ):
+            self.assertEqual(self.post_json(reverse("api_documentos"), bad_payload).status_code, 400)
+        response = self.post_json(reverse("api_documentos"), {"titulo": "Texto", "proyecto": "no-es-id"})
+        self.assertEqual(response.status_code, 400)
+        documento = Documento.objects.create(titulo="Texto", creador=self.alumno)
+        url = reverse("api_documento", args=[documento.pk])
+        for version in (True, 0, -1, 1.5, "1.5"):
+            response = self.client.patch(
+                url, data=json.dumps({"version": version, "contenido": "Cambio"}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 400, repr(version))
+        documento.refresh_from_db()
+        self.assertEqual(documento.contenido, "")
 
     def test_profesor_crea_y_edita_su_documento_de_catedra_privado(self):
         self.client.force_login(self.profesor)

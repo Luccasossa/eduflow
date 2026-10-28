@@ -29,7 +29,7 @@ def _json_body(request):
 
 def _es_colaborador(documento, usuario):
     if documento.proyecto_id:
-        return documento.creador_id == usuario.id or documento.proyecto.creador_id == usuario.id or documento.proyecto.integrantes.filter(pk=usuario.pk).exists()
+        return documento.proyecto.creador_id == usuario.id or documento.proyecto.integrantes.filter(pk=usuario.pk).exists()
     return documento.creador_id == usuario.id or documento.colaboradores.filter(pk=usuario.pk).exists()
 
 
@@ -78,10 +78,18 @@ def api_documentos(request):
         documentos = Documento.objects.select_related("creador", "proyecto").prefetch_related("colaboradores")
         if rol == "alumno":
             from django.db.models import Q
-            documentos = documentos.filter(Q(creador=request.user) | Q(colaboradores=request.user, proyecto__isnull=True) | Q(proyecto__creador=request.user) | Q(proyecto__integrantes=request.user)).distinct()
+            documentos = documentos.filter(
+                Q(proyecto__isnull=True, creador=request.user)
+                | Q(proyecto__isnull=True, colaboradores=request.user)
+                | Q(proyecto__creador=request.user)
+                | Q(proyecto__integrantes=request.user)
+            ).distinct()
         else:
             from django.db.models import Q
-            documentos = documentos.filter(Q(proyecto__profesores=request.user) | Q(creador=request.user))
+            documentos = documentos.filter(
+                Q(proyecto__profesores=request.user)
+                | Q(proyecto__isnull=True, creador=request.user)
+            )
             if request.user.is_superuser:
                 documentos = Documento.objects.select_related("creador", "proyecto").prefetch_related("colaboradores")
         if request.GET.get("proyecto"):
@@ -92,22 +100,30 @@ def api_documentos(request):
     data = _json_body(request)
     if data is None:
         return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON válido."}, status=400)
-    titulo = str(data.get("titulo", "")).strip()
+    titulo = data.get("titulo", "")
     contenido = data.get("contenido", "")
-    if not titulo or len(titulo) > 200:
+    if not isinstance(titulo, str) or not titulo.strip() or len(titulo.strip()) > 200:
         return JsonResponse({"error": "El título es obligatorio y admite hasta 200 caracteres."}, status=400)
+    titulo = titulo.strip()
     if not isinstance(contenido, str) or len(contenido) > 1_000_000:
         return JsonResponse({"error": "El contenido debe ser texto y no superar 1 MB."}, status=400)
     proyecto = None
     if data.get("proyecto") not in (None, ""):
-        proyecto = get_object_or_404(Proyecto, pk=data["proyecto"])
+        proyecto_id = data["proyecto"]
+        if isinstance(proyecto_id, bool) or not (
+            isinstance(proyecto_id, int)
+            or (isinstance(proyecto_id, str) and proyecto_id.isdigit())
+        ):
+            return JsonResponse({"error": "El proyecto indicado no es valido."}, status=400)
+        proyecto = get_object_or_404(Proyecto, pk=proyecto_id)
         if rol == "profesor" and not profesor_autorizado(request.user, proyecto):
             raise Http404
         if rol == "alumno" and proyecto.creador_id != request.user.id and not proyecto.integrantes.filter(pk=request.user.pk).exists():
             raise Http404
-    documento = Documento.objects.create(titulo=titulo, contenido=contenido, creador=request.user, proyecto=proyecto)
-    if proyecto:
-        documento.colaboradores.add(*proyecto.integrantes.exclude(pk=request.user.pk))
+    with transaction.atomic():
+        documento = Documento.objects.create(titulo=titulo, contenido=contenido, creador=request.user, proyecto=proyecto)
+        if proyecto:
+            documento.colaboradores.add(*proyecto.integrantes.exclude(pk=request.user.pk))
     return JsonResponse({"documento": _serializar(documento, request.user)}, status=201)
 
 
@@ -116,12 +132,7 @@ def api_documentos(request):
 def api_documento(request, pk):
     documento = get_object_or_404(Documento.objects.select_related("creador", "proyecto").prefetch_related("colaboradores"), pk=pk)
     rol = _rol(request.user)
-    if rol == "profesor":
-        if documento.proyecto_id is None and documento.creador_id != request.user.id:
-            raise Http404
-        if documento.proyecto_id and not profesor_autorizado(request.user, documento.proyecto):
-            raise Http404
-    elif rol != "alumno" or not _es_colaborador(documento, request.user):
+    if not _visible_a(documento, request.user):
         raise Http404
     if request.method != "GET":
         if documento.creador_id != request.user.id and not (
@@ -141,23 +152,33 @@ def api_documento(request, pk):
     if "version" not in data:
         return JsonResponse({"error": "Envía la versión que estás editando para detectar conflictos."}, status=400)
     try:
-        version = int(data["version"])
+        version_input = data["version"]
+        if isinstance(version_input, bool) or not (
+            isinstance(version_input, int)
+            or (isinstance(version_input, str) and version_input.isdigit())
+        ):
+            raise ValueError
+        version = int(version_input)
+        if version < 1:
+            raise ValueError
     except (TypeError, ValueError):
         return JsonResponse({"error": "La versión del documento no es válida."}, status=400)
     with transaction.atomic():
         actual = Documento.objects.select_for_update().select_related("creador", "proyecto").get(pk=pk)
+        if not _visible_a(actual, request.user):
+            raise Http404
         if actual.version != version:
             return JsonResponse({"error": "El documento cambió desde que lo abriste. Recarga la versión actual antes de guardar.", "conflicto": True, "documento": _serializar(actual, request.user)}, status=409)
         if actual.creador_id != request.user.id and actual.proyecto_id is None:
             # Personal collaborators can read; only the owner edits private documents.
             return JsonResponse({"error": "Solo el propietario puede editar este documento."}, status=403)
-        titulo = str(data.get("titulo", actual.titulo)).strip()
+        titulo = data.get("titulo", actual.titulo)
         contenido = data.get("contenido", actual.contenido)
-        if not titulo or len(titulo) > 200:
+        if not isinstance(titulo, str) or not titulo.strip() or len(titulo.strip()) > 200:
             return JsonResponse({"error": "El título es obligatorio y admite hasta 200 caracteres."}, status=400)
         if not isinstance(contenido, str) or len(contenido) > 1_000_000:
             return JsonResponse({"error": "El contenido debe ser texto y no superar 1 MB."}, status=400)
-        actual.titulo = titulo
+        actual.titulo = titulo.strip()
         actual.contenido = contenido
         actual.version += 1
         actual.save(update_fields=("titulo", "contenido", "version", "fecha_actualizacion"))
@@ -168,10 +189,10 @@ def api_documento(request, pk):
 @require_http_methods(["PATCH"])
 def api_evaluar_documento(request, pk):
     if _rol(request.user) != "profesor":
-        return JsonResponse({"error": "Solo los profesores pueden dejar retroalimentaci?n."}, status=403)
+        return JsonResponse({"error": "Solo los profesores pueden dejar retroalimentaci\u00f3n."}, status=403)
     data = _json_body(request)
     if data is None:
-        return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON v?lido."}, status=400)
+        return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON v\u00e1lido."}, status=400)
 
     with transaction.atomic():
         documento = get_object_or_404(
@@ -184,7 +205,7 @@ def api_evaluar_documento(request, pk):
 
         feedback = data.get("retroalimentacion", documento.retroalimentacion)
         if not isinstance(feedback, str) or len(feedback) > 20000:
-            return JsonResponse({"error": "La retroalimentaci?n debe ser texto de hasta 20.000 caracteres."}, status=400)
+            return JsonResponse({"error": "La retroalimentaci\u00f3n debe ser texto de hasta 20.000 caracteres."}, status=400)
         documento.retroalimentacion = feedback.strip()
         if "calificacion" in data:
             try:
@@ -195,9 +216,9 @@ def api_evaluar_documento(request, pk):
                     max_value=settings.EDUFLOW_GRADE_MAX,
                 ).clean(data["calificacion"])
             except (ValidationError, TypeError):
-                return JsonResponse({"error": "La calificaci?n debe ser un n?mero v?lido igual o mayor que cero."}, status=400)
+                return JsonResponse({"error": "La calificaci\u00f3n debe ser un n\u00famero v\u00e1lido igual o mayor que cero."}, status=400)
         if not documento.retroalimentacion.strip() and "calificacion" not in data:
-            return JsonResponse({"error": "La devoluci?n debe incluir un comentario o una calificaci?n."}, status=400)
+            return JsonResponse({"error": "La devoluci\u00f3n debe incluir un comentario o una calificaci\u00f3n."}, status=400)
 
         nota_de_esta_devolucion = documento.calificacion if "calificacion" in data else None
         devolucion = DevolucionDocente(
@@ -210,7 +231,7 @@ def api_evaluar_documento(request, pk):
         try:
             devolucion.full_clean()
         except ValidationError:
-            return JsonResponse({"error": "La devoluci?n no es v?lida."}, status=400)
+            return JsonResponse({"error": "La devoluci\u00f3n no es v\u00e1lida."}, status=400)
         devolucion.save()
         documento.evaluado_por = request.user
         documento.save(update_fields=("retroalimentacion", "calificacion", "evaluado_por"))

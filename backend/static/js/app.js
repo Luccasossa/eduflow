@@ -20,6 +20,11 @@
     let academicDocuments = [];
     let editingDocument = null;
     let documentConflictPending = false;
+    let documentConflictVersion = null;
+    let latestConflictDocument = null;
+    let documentSession = 0;
+    let documentListRequest = 0;
+    let documentSaveInFlight = false;
 
     async function api(url, method = "GET", data = undefined) {
         const options = { method, headers: { Accept: "application/json" } };
@@ -28,7 +33,12 @@
             options.headers["X-CSRFToken"] = csrf;
             options.body = JSON.stringify(data);
         }
-        const response = await fetch(url, options);
+        let response;
+        try {
+            response = await fetch(url, options);
+        } catch (_) {
+            throw new Error("No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.");
+        }
         let payload = {};
         try { payload = await response.json(); } catch (_) { /* respuesta vacía */ }
         if (response.redirected) {
@@ -36,7 +46,12 @@
             throw new Error("Tu sesión expiró. Inicia sesión de nuevo.");
         }
         if (!response.ok) {
-            const error = new Error(payload.error || "No se pudo completar la operación.");
+            const fallback = response.status === 401
+                ? "Tu sesi\u00f3n expir\u00f3. Inicia sesi\u00f3n de nuevo."
+                : response.status === 403
+                    ? "La solicitud fue rechazada por permisos o por la protecci\u00f3n CSRF."
+                    : "No se pudo completar la operaci\u00f3n.";
+            const error = new Error(payload.error || fallback);
             error.payload = payload;
             throw error;
         }
@@ -111,10 +126,15 @@
     }
 
     async function loadDocuments() {
+        const requestId = ++documentListRequest;
         try {
-            academicDocuments = (await api("/documentos/api/")).documentos;
+            const result = await api("/documentos/api/");
+            if (requestId !== documentListRequest) return;
+            academicDocuments = result.documentos;
             renderDocuments();
-        } catch (error) { notify(error.message, true); }
+        } catch (error) {
+            if (requestId === documentListRequest) notify(error.message, true);
+        }
     }
 
     function renderDocuments() {
@@ -139,10 +159,8 @@
     }
 
     const documentModal = $("#documentModal");
-    function closeDocument() { documentModal?.classList.remove("show"); }
-    function openDocument(documento = null) {
+    function applyDocumentToEditor(documento) {
         editingDocument = documento;
-        documentConflictPending = false;
         $("#documentModalTitle").textContent = documento ? documento.titulo : "Nuevo documento";
         $("#documentTitleInput").value = documento?.titulo || "";
         $("#documentContentInput").value = documento?.contenido || "";
@@ -151,49 +169,119 @@
         $("#documentTitleInput").readOnly = Boolean(documento && !documento.puede_editar);
         $("#documentContentInput").readOnly = Boolean(documento && !documento.puede_editar);
         $("#saveDocumentBtn").hidden = Boolean(documento && !documento.puede_editar);
+        $("#saveDocumentBtn").disabled = documentSaveInFlight || Boolean(documento && !documento.puede_editar);
         $("#deleteDocumentBtn").hidden = !documento || !documento.puede_eliminar;
-        $("#documentVersionLabel").textContent = documento ? `Versión ${documento.version}` : "";
+        $("#deleteDocumentBtn").disabled = documentSaveInFlight;
+        $("#documentVersionLabel").textContent = documento ? `Version ${documento.version}` : "";
+    }
+
+    function closeDocument() {
+        documentSession += 1;
+        documentModal?.classList.remove("show");
+    }
+
+    async function openDocument(documento = null) {
+        const session = ++documentSession;
+        documentConflictPending = false;
+        documentConflictVersion = null;
+        latestConflictDocument = null;
         $("#documentFormError").textContent = "";
         $("#documentConflict").hidden = true;
+        $("#documentRestoreVersionBtn").hidden = true;
+        applyDocumentToEditor(documento ? { ...documento } : null);
         documentModal.classList.add("show");
+        if (!documento) return;
+
+        $("#saveDocumentBtn").disabled = true;
+        try {
+            const result = await api(`/documentos/api/${documento.id}/`);
+            if (session !== documentSession) return;
+            applyDocumentToEditor(result.documento);
+        } catch (error) {
+            if (session !== documentSession) return;
+            $("#saveDocumentBtn").hidden = true;
+            $("#documentFormError").textContent = error.message;
+        }
     }
 
     async function saveDocument() {
-        if (documentConflictPending && !window.confirm("¿Revisaste la versión guardada y quieres guardar el borrador actual sobre ella?")) return;
+        if (documentSaveInFlight || (editingDocument && !editingDocument.puede_editar)) return;
+        const session = documentSession;
+        const documentAtStart = editingDocument ? { ...editingDocument } : null;
+        let version = documentAtStart?.version;
+        if (documentConflictPending) {
+            if (!window.confirm("Revisaste la version guardada. Quieres guardar tu borrador sobre esa version?")) return;
+            version = documentConflictVersion;
+        }
         const payload = { titulo: $("#documentTitleInput").value.trim(), contenido: $("#documentContentInput").value };
         const project = $("#documentProjectInput").value;
-        if (!editingDocument && project) payload.proyecto = Number(project);
-        if (editingDocument) payload.version = editingDocument.version;
+        if (!documentAtStart && project) payload.proyecto = Number(project);
+        if (documentAtStart) payload.version = version;
+
+        documentSaveInFlight = true;
+        $("#saveDocumentBtn").disabled = true;
+        $("#deleteDocumentBtn").disabled = true;
         try {
-            const result = editingDocument
-                ? await api(`/documentos/api/${editingDocument.id}/`, "PATCH", payload)
-                : await api("/documentos/api/", "POST", payload);
-            closeDocument();
+            await (documentAtStart
+                ? api(`/documentos/api/${documentAtStart.id}/`, "PATCH", payload)
+                : api("/documentos/api/", "POST", payload));
             documentConflictPending = false;
+            documentConflictVersion = null;
+            latestConflictDocument = null;
             await loadDocuments();
+            if (session === documentSession && editingDocument?.id === documentAtStart?.id) closeDocument();
             notify("Documento guardado.");
         } catch (error) {
-            if (error.payload?.conflicto) {
+            if (session !== documentSession) return;
+            if (error.payload?.conflicto && error.payload.documento) {
+                latestConflictDocument = error.payload.documento;
+                documentConflictVersion = latestConflictDocument.version;
                 documentConflictPending = true;
-                editingDocument.version = error.payload.documento.version;
-                $("#documentVersionLabel").textContent = `Versión guardada ${editingDocument.version}`;
-                $("#documentConflictContent").textContent = error.payload.documento.contenido;
+                $("#documentVersionLabel").textContent = `Version guardada ${documentConflictVersion}`;
+                $("#documentConflictContent").textContent = `Titulo: ${latestConflictDocument.titulo}\n\n${latestConflictDocument.contenido}`;
                 $("#documentConflict").hidden = false;
-                $("#documentFormError").textContent = "Tu borrador sigue en el editor. Compara ambas versiones antes de guardar.";
+                $("#documentRestoreVersionBtn").hidden = false;
+                $("#documentFormError").textContent = "Tu borrador sigue en el editor. Compara ambas versiones o carga la guardada antes de decidir.";
             } else {
                 $("#documentFormError").textContent = error.message;
             }
+        } finally {
+            documentSaveInFlight = false;
+            $("#saveDocumentBtn").disabled = Boolean(editingDocument && !editingDocument.puede_editar);
+            $("#deleteDocumentBtn").disabled = false;
         }
     }
 
     async function deleteDocument() {
-        if (!editingDocument || !window.confirm(`¿Eliminar “${editingDocument.titulo}”?`)) return;
+        if (documentSaveInFlight || !editingDocument || !window.confirm(`Eliminar "${editingDocument.titulo}"?`)) return;
+        const session = documentSession;
+        const documentAtStart = { ...editingDocument };
+        documentSaveInFlight = true;
+        $("#deleteDocumentBtn").disabled = true;
+        $("#saveDocumentBtn").disabled = true;
         try {
-            await api(`/documentos/api/${editingDocument.id}/`, "DELETE", {});
-            closeDocument();
+            await api(`/documentos/api/${documentAtStart.id}/`, "DELETE", {});
             await loadDocuments();
+            if (session === documentSession && editingDocument?.id === documentAtStart.id) closeDocument();
             notify("Documento eliminado.");
-        } catch (error) { $("#documentFormError").textContent = error.message; }
+        } catch (error) {
+            if (session === documentSession) $("#documentFormError").textContent = error.message;
+        } finally {
+            documentSaveInFlight = false;
+            $("#saveDocumentBtn").disabled = Boolean(editingDocument && !editingDocument.puede_editar);
+            $("#deleteDocumentBtn").disabled = false;
+        }
+    }
+
+    function restoreLatestDocumentVersion() {
+        if (!latestConflictDocument || !window.confirm("Cargar la version del servidor y descartar el borrador actual?")) return;
+        applyDocumentToEditor(latestConflictDocument);
+        documentConflictPending = false;
+        documentConflictVersion = null;
+        latestConflictDocument = null;
+        $("#documentConflict").hidden = true;
+        $("#documentRestoreVersionBtn").hidden = true;
+        $("#documentFormError").textContent = "";
     }
 
     function make(tag, className, text) {
@@ -555,6 +643,7 @@
     $("#newDocumentBtn")?.addEventListener("click", () => openDocument());
     $("#saveDocumentBtn")?.addEventListener("click", saveDocument);
     $("#deleteDocumentBtn")?.addEventListener("click", deleteDocument);
+    $("#documentRestoreVersionBtn")?.addEventListener("click", restoreLatestDocumentVersion);
     $$('[data-close-document]').forEach((button) => button.addEventListener("click", closeDocument));
     documentModal?.addEventListener("click", (event) => { if (event.target === documentModal) closeDocument(); });
 

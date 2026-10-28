@@ -1462,9 +1462,11 @@ nav {
             <label for="teacherDocContent">Contenido</label>
             <textarea id="teacherDocContent" rows="12" maxlength="1000000"></textarea>
             <p id="teacherDocError" class="form-error" role="alert"></p>
+            <pre id="teacherDocConflict" hidden></pre>
+            <button type="button" class="secondary-button" id="teacherDocRestore" hidden>Cargar version guardada</button>
             <div class="modal-actions">
                 <button type="button" class="secondary-button" data-close>Cancelar</button>
-                <button type="submit" class="primary-button">Guardar</button>
+                <button type="submit" class="primary-button" id="teacherDocSave">Guardar</button>
             </div>
         </form>
     </dialog>
@@ -1555,6 +1557,10 @@ nav {
 
     var state = { projectId: null, docId: null, editingTaskId: null, editingDocument: null, nextTaskId: 100 };
     var evaluationTask = null;
+    var teacherDocumentSession = 0;
+    var teacherDocumentSaving = false;
+    var teacherDocumentLoading = false;
+    var teacherConflictDocument = null;
 
     function csrfToken() {
         var input = document.querySelector('[name="csrfmiddlewaretoken"]');
@@ -1591,10 +1597,22 @@ nav {
     function requestJson(url, options) {
         options = options || {};
         options.headers = Object.assign({ 'Accept': 'application/json' }, options.headers || {});
-        return fetch(url, options).then(function (response) {
-            if (response.redirected) { window.location.assign(response.url); throw new Error('Inicia sesión de nuevo.'); }
-            return response.json().then(function (data) {
-                if (!response.ok) throw new Error(data.error || 'No se pudo completar la operación.');
+        return fetch(url, options).catch(function () {
+            throw new Error('No se pudo conectar con el servidor. Revisa tu conexion e intentalo de nuevo.');
+        }).then(function (response) {
+            if (response.redirected) { window.location.assign(response.url); throw new Error('Inicia sesion de nuevo.'); }
+            return response.json().catch(function () { return {}; }).then(function (data) {
+                if (!response.ok) {
+                    var fallback = response.status === 401
+                        ? 'Tu sesion expiro. Inicia sesion de nuevo.'
+                        : response.status === 403
+                            ? 'La solicitud fue rechazada por permisos o por la proteccion CSRF.'
+                            : 'No se pudo completar la operacion.';
+                    var error = new Error(data.error || fallback);
+                    error.status = response.status;
+                    error.payload = data;
+                    throw error;
+                }
                 return data;
             });
         });
@@ -2003,35 +2021,96 @@ nav {
         });
     }
 
-    function openTeacherDocument(doc) {
+    function applyTeacherDocument(doc) {
         state.editingDocument = doc || null;
-        $('teacherDocumentTitle').textContent = doc ? 'Editar documento de cátedra' : 'Nuevo documento de cátedra';
+        $('teacherDocumentTitle').textContent = doc ? 'Editar documento de catedra' : 'Nuevo documento de catedra';
         $('teacherDocName').value = doc ? doc.titulo : '';
         $('teacherDocContent').value = doc ? doc.contenido : '';
         $('teacherDocProject').value = doc ? (doc.proyecto_id || '') : '';
         $('teacherDocProject').disabled = Boolean(doc);
+        $('teacherDocSave').disabled = teacherDocumentSaving || teacherDocumentLoading || Boolean(doc && !doc.puede_editar);
+    }
+
+    function openTeacherDocument(doc) {
+        var session = ++teacherDocumentSession;
+        teacherDocumentLoading = Boolean(doc);
+        teacherConflictDocument = null;
         $('teacherDocError').textContent = '';
+        $('teacherDocConflict').hidden = true;
+        $('teacherDocRestore').hidden = true;
+        applyTeacherDocument(doc ? Object.assign({}, doc) : null);
         $('teacherDocumentEditor').showModal();
+        if (!doc) return;
+
+        $('teacherDocSave').disabled = true;
+        requestJson('/documentos/api/' + doc.id + '/').then(function (result) {
+            if (session !== teacherDocumentSession) return;
+            teacherDocumentLoading = false;
+            applyTeacherDocument(result.documento);
+        }).catch(function (error) {
+            if (session !== teacherDocumentSession) return;
+            teacherDocumentLoading = false;
+            $('teacherDocSave').disabled = true;
+            $('teacherDocError').textContent = error.message;
+        });
     }
 
     function initTeacherDocuments() {
         $('newTeacherDocument').addEventListener('click', function () { openTeacherDocument(null); });
+        $('teacherDocumentEditor').addEventListener('close', function () {
+            teacherDocumentSession += 1;
+            teacherDocumentLoading = false;
+        });
         $('teacherDocumentForm').addEventListener('submit', function (event) {
             event.preventDefault();
-            var doc = state.editingDocument;
+            if (teacherDocumentSaving) return;
+            var session = teacherDocumentSession;
+            var doc = state.editingDocument ? Object.assign({}, state.editingDocument) : null;
             var payload = { titulo: $('teacherDocName').value.trim(), contenido: $('teacherDocContent').value };
-            if (doc) payload.version = doc.version;
-            else if ($('teacherDocProject').value) payload.proyecto = Number($('teacherDocProject').value);
+            if (doc) {
+                if (teacherConflictDocument) {
+                    if (!window.confirm('Compara ambas versiones antes de guardar tu borrador sobre la version actual. Continuar?')) return;
+                    payload.version = teacherConflictDocument.version;
+                } else payload.version = doc.version;
+            } else if ($('teacherDocProject').value) payload.proyecto = Number($('teacherDocProject').value);
+
+            teacherDocumentSaving = true;
+            $('teacherDocSave').disabled = true;
             requestJson(doc ? '/documentos/api/' + doc.id + '/' : '/documentos/api/', {
                 method: doc ? 'PATCH' : 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
                 body: JSON.stringify(payload)
             }).then(function () {
+                if (session !== teacherDocumentSession) return;
                 $('teacherDocumentEditor').close();
                 state.editingDocument = null;
-                return loadProjects();
-            }).then(function () { toast('Documento guardado.'); })
-                .catch(function (error) { $('teacherDocError').textContent = error.message; });
+                return loadProjects().then(function () { toast('Documento guardado.'); });
+            }).catch(function (error) {
+                if (session !== teacherDocumentSession) return;
+                if (error.status === 409 && error.payload && error.payload.documento) {
+                    teacherConflictDocument = error.payload.documento;
+                    $('teacherDocConflict').textContent = 'Version guardada ' + teacherConflictDocument.version + '\nTitulo: ' + teacherConflictDocument.titulo + '\n\n' + teacherConflictDocument.contenido;
+                    $('teacherDocConflict').hidden = false;
+                    $('teacherDocRestore').hidden = false;
+                    $('teacherDocError').textContent = 'Tu borrador sigue en el editor. Compara ambas versiones antes de decidir.';
+                } else {
+                    $('teacherDocError').textContent = error.message;
+                }
+            }).then(function () {
+                teacherDocumentSaving = false;
+                $('teacherDocSave').disabled = teacherDocumentLoading || Boolean(state.editingDocument && !state.editingDocument.puede_editar);
+            }, function () {
+                teacherDocumentSaving = false;
+                $('teacherDocSave').disabled = teacherDocumentLoading || Boolean(state.editingDocument && !state.editingDocument.puede_editar);
+            });
+        });
+        $('teacherDocRestore').addEventListener('click', function () {
+            if (!teacherConflictDocument || !window.confirm('Cargar la version del servidor y descartar el borrador actual?')) return;
+            applyTeacherDocument(teacherConflictDocument);
+            teacherConflictDocument = null;
+            $('teacherDocConflict').hidden = true;
+            $('teacherDocRestore').hidden = true;
+            $('teacherDocError').textContent = '';
         });
     }
 
