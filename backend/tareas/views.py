@@ -1,9 +1,10 @@
 import json
 from datetime import date
+from django.db import IntegrityError, transaction
 from django.contrib.auth.decorators import login_required
 from django import forms
 from django.core.exceptions import ValidationError
-from django.http import Http404, JsonResponse
+from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
 from django.views.decorators.http import require_http_methods
 from django.conf import settings
@@ -11,7 +12,7 @@ from django.conf import settings
 from proyectos.models import Proyecto
 from proyectos.models import DevolucionDocente
 from proyectos.permissions import profesor_autorizado
-from .models import Tarea
+from .models import Entrega, Tarea
 
 
 def _rol(usuario):
@@ -157,9 +158,10 @@ def api_tareas(request):
         fields = _validar_campos(data)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
-    tarea = Tarea.objects.create(creador=request.user, proyecto=proyecto, **fields)
-    if proyecto:
-        proyecto.actualizar_progreso()
+    with transaction.atomic():
+        tarea = Tarea.objects.create(creador=request.user, proyecto=proyecto, **fields)
+        if proyecto:
+            proyecto.actualizar_progreso()
     return JsonResponse({"tarea": _serializar(tarea)}, status=201)
 
 
@@ -174,9 +176,10 @@ def api_tarea(request, pk):
         return JsonResponse({"error": "Los profesores solo pueden revisar y calificar tareas."}, status=403)
     if request.method == "DELETE":
         proyecto = tarea.proyecto
-        tarea.delete()
-        if proyecto:
-            proyecto.actualizar_progreso()
+        with transaction.atomic():
+            tarea.delete()
+            if proyecto:
+                proyecto.actualizar_progreso()
         return JsonResponse({"eliminada": True})
     data = _json_body(request)
     if data is None:
@@ -185,11 +188,12 @@ def api_tarea(request, pk):
         fields = _validar_campos(data, tarea)
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
-    for key, value in fields.items():
-        setattr(tarea, key, value)
-    tarea.save(update_fields=(*fields.keys(),))
-    if tarea.proyecto_id:
-        tarea.proyecto.actualizar_progreso()
+    with transaction.atomic():
+        for key, value in fields.items():
+            setattr(tarea, key, value)
+        tarea.save(update_fields=(*fields.keys(),))
+        if tarea.proyecto_id:
+            tarea.proyecto.actualizar_progreso()
     return JsonResponse({"tarea": _serializar(tarea)})
 
 
@@ -206,20 +210,109 @@ def api_calificar_tarea(request, pk):
         return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON válido."}, status=400)
     if "calificacion" not in data:
         return JsonResponse({"error": "Indica una calificación válida."}, status=400)
+    retroalimentacion = data.get("retroalimentacion", "")
     try:
         calificacion = forms.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=settings.EDUFLOW_GRADE_MAX).clean(data["calificacion"])
-        retroalimentacion = str(data.get("retroalimentacion", "")).strip()
-        if len(retroalimentacion) > 20000:
+        if not isinstance(retroalimentacion, str) or len(retroalimentacion) > 20000:
             raise ValueError
+        retroalimentacion = retroalimentacion.strip()
     except (ValidationError, ValueError, TypeError):
         return JsonResponse({"error": "La calificación o retroalimentación no es válida."}, status=400)
-    DevolucionDocente.objects.create(proyecto=tarea.proyecto, tarea=tarea, autor=request.user,
-                                     calificacion=calificacion, comentario=retroalimentacion)
-    tarea.calificacion = calificacion
-    tarea.retroalimentacion = retroalimentacion
-    tarea.evaluado_por = request.user
-    tarea.save(update_fields=("calificacion", "retroalimentacion", "evaluado_por"))
+    with transaction.atomic():
+        tarea = get_object_or_404(
+            Tarea.objects.select_for_update().select_related("proyecto"), pk=pk,
+        )
+        if tarea.proyecto_id is None or not profesor_autorizado(request.user, tarea.proyecto):
+            raise Http404
+        devolucion = DevolucionDocente(proyecto=tarea.proyecto, tarea=tarea, autor=request.user,
+                                       calificacion=calificacion, comentario=retroalimentacion)
+        try:
+            devolucion.full_clean()
+        except ValidationError:
+            return JsonResponse({"error": "La evaluación no es válida."}, status=400)
+        devolucion.save()
+        tarea.calificacion = calificacion
+        tarea.retroalimentacion = retroalimentacion
+        tarea.evaluado_por = request.user
+        tarea.save(update_fields=("calificacion", "retroalimentacion", "evaluado_por"))
     return JsonResponse({"tarea": _serializar(tarea)})
+
+
+def _serializar_entrega(entrega):
+    return {
+        "id": entrega.pk,
+        "tarea_id": entrega.tarea_id,
+        "alumno_id": entrega.alumno_id,
+        "nombre": entrega.archivo.name.rsplit("/", 1)[-1],
+        "fecha_entrega": entrega.fecha_entrega.isoformat(),
+        "estado": entrega.estado,
+        "observaciones": entrega.observaciones,
+        "descarga": f"/tareas/entregas/{entrega.pk}/descargar/",
+    }
+
+
+@login_required
+@require_http_methods(["GET", "POST"])
+def api_entregas(request, pk):
+    tarea = _tarea_autorizada(request, pk)
+    if request.method == "GET":
+        entregas = Entrega.objects.filter(tarea=tarea).select_related("alumno")
+        if _rol(request.user) == "alumno":
+            entregas = entregas.filter(alumno=request.user)
+        return JsonResponse({"entregas": [_serializar_entrega(item) for item in entregas]})
+
+    if _rol(request.user) != "alumno":
+        return JsonResponse({"error": "Solo los alumnos autorizados pueden entregar archivos."}, status=403)
+    archivo = request.FILES.get("archivo")
+    if archivo is None:
+        return JsonResponse({"error": "Selecciona un archivo para entregar."}, status=400)
+    observaciones = request.POST.get("observaciones", "").strip()
+    if len(observaciones) > 20000:
+        return JsonResponse({"error": "Las observaciones superan el límite permitido."}, status=400)
+    if Entrega.objects.filter(tarea=tarea, alumno=request.user).exists():
+        return JsonResponse({"error": "Ya existe una entrega para esta tarea."}, status=409)
+    entrega = Entrega(tarea=tarea, alumno=request.user, archivo=archivo, observaciones=observaciones)
+    try:
+        entrega.full_clean()
+        with transaction.atomic():
+            entrega.save()
+    except ValidationError as exc:
+        return JsonResponse({"error": exc.messages}, status=400)
+    except IntegrityError:
+        if entrega.archivo.name:
+            entrega.archivo.storage.delete(entrega.archivo.name)
+        return JsonResponse({"error": "Ya existe una entrega para esta tarea."}, status=409)
+    return JsonResponse({"entrega": _serializar_entrega(entrega)}, status=201)
+
+
+@login_required
+@require_http_methods(["GET"])
+def descargar_entrega(request, pk):
+    entrega = get_object_or_404(Entrega.objects.select_related("tarea__proyecto", "alumno"), pk=pk)
+    tarea = entrega.tarea
+    rol = _rol(request.user)
+    autorizado = (
+        rol == "alumno" and entrega.alumno_id == request.user.id
+        and (tarea.proyecto_id is None or (
+            tarea.proyecto.creador_id == request.user.id
+            or tarea.proyecto.integrantes.filter(pk=request.user.pk).exists()
+        ))
+    ) or (
+        rol == "profesor" and tarea.proyecto_id is not None
+        and profesor_autorizado(request.user, tarea.proyecto)
+    )
+    if not autorizado:
+        raise Http404
+    try:
+        response = FileResponse(
+            entrega.archivo.open("rb"), as_attachment=True,
+            filename=entrega.archivo.name.rsplit("/", 1)[-1],
+        )
+    except (FileNotFoundError, ValueError):
+        raise Http404
+    response["X-Content-Type-Options"] = "nosniff"
+    response["Cache-Control"] = "private, no-store"
+    return response
 
 
 @login_required

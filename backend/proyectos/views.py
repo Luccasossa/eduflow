@@ -4,6 +4,7 @@ from datetime import date
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
 from django.db.models import ProtectedError
+from django import forms
 from django.core.exceptions import ValidationError
 from django.conf import settings
 from django.http import Http404, JsonResponse
@@ -225,9 +226,10 @@ def api_devoluciones(request, pk):
         from decimal import Decimal, InvalidOperation
         calificacion = None
         if data.get("calificacion") not in (None, ""):
-            calificacion = Decimal(str(data["calificacion"]))
-            if not calificacion.is_finite() or calificacion < 0 or calificacion > Decimal(str(getattr(settings, "EDUFLOW_GRADE_MAX", 10))):
-                raise InvalidOperation
+            calificacion = forms.DecimalField(
+                max_digits=5, decimal_places=2, min_value=0,
+                max_value=settings.EDUFLOW_GRADE_MAX,
+            ).clean(data["calificacion"])
         tarea = None
         documento = None
         if data.get("tarea_id") not in (None, ""):
@@ -238,8 +240,9 @@ def api_devoluciones(request, pk):
             documento = get_object_or_404(Documento, pk=data["documento_id"], proyecto=proyecto)
         entry = DevolucionDocente(proyecto=proyecto, tarea=tarea, documento=documento,
                                   autor=request.user, comentario=comentario.strip(), calificacion=calificacion)
-        entry.full_clean()
-        entry.save()
+        with transaction.atomic():
+            entry.full_clean()
+            entry.save()
     except (ValueError, TypeError, InvalidOperation, ValidationError):
         return JsonResponse({"error": f"La calificación debe estar entre 0 y {getattr(settings, 'EDUFLOW_GRADE_MAX', 10)} y la devolución debe incluir comentario o nota."}, status=400)
     return JsonResponse({"devolucion": _serializar_devolucion(entry)}, status=201)

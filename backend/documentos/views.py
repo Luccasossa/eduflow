@@ -168,27 +168,55 @@ def api_documento(request, pk):
 @require_http_methods(["PATCH"])
 def api_evaluar_documento(request, pk):
     if _rol(request.user) != "profesor":
-        return JsonResponse({"error": "Solo los profesores pueden dejar retroalimentación."}, status=403)
-    documento = get_object_or_404(Documento.objects.select_related("proyecto"), pk=pk, proyecto__isnull=False)
-    if not profesor_autorizado(request.user, documento.proyecto):
-        raise Http404
+        return JsonResponse({"error": "Solo los profesores pueden dejar retroalimentaci?n."}, status=403)
     data = _json_body(request)
     if data is None:
-        return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON válido."}, status=400)
-    feedback = data.get("retroalimentacion", documento.retroalimentacion)
-    if not isinstance(feedback, str) or len(feedback) > 20000:
-        return JsonResponse({"error": "La retroalimentación debe ser texto de hasta 20.000 caracteres."}, status=400)
-    documento.retroalimentacion = feedback.strip()
-    if "calificacion" in data:
+        return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON v?lido."}, status=400)
+
+    with transaction.atomic():
+        documento = get_object_or_404(
+            Documento.objects.select_for_update().select_related("proyecto"),
+            pk=pk,
+            proyecto__isnull=False,
+        )
+        if not profesor_autorizado(request.user, documento.proyecto):
+            raise Http404
+
+        feedback = data.get("retroalimentacion", documento.retroalimentacion)
+        if not isinstance(feedback, str) or len(feedback) > 20000:
+            return JsonResponse({"error": "La retroalimentaci?n debe ser texto de hasta 20.000 caracteres."}, status=400)
+        documento.retroalimentacion = feedback.strip()
+        if "calificacion" in data:
+            try:
+                documento.calificacion = forms.DecimalField(
+                    max_digits=5,
+                    decimal_places=2,
+                    min_value=0,
+                    max_value=settings.EDUFLOW_GRADE_MAX,
+                ).clean(data["calificacion"])
+            except (ValidationError, TypeError):
+                return JsonResponse({"error": "La calificaci?n debe ser un n?mero v?lido igual o mayor que cero."}, status=400)
+        if not documento.retroalimentacion.strip() and "calificacion" not in data:
+            return JsonResponse({"error": "La devoluci?n debe incluir un comentario o una calificaci?n."}, status=400)
+
+        nota_de_esta_devolucion = documento.calificacion if "calificacion" in data else None
+        devolucion = DevolucionDocente(
+            proyecto=documento.proyecto,
+            documento=documento,
+            autor=request.user,
+            comentario=documento.retroalimentacion,
+            calificacion=nota_de_esta_devolucion,
+        )
         try:
-            documento.calificacion = forms.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=settings.EDUFLOW_GRADE_MAX).clean(data["calificacion"])
-        except (ValidationError, TypeError):
-            return JsonResponse({"error": "La calificación debe ser un número válido igual o mayor que cero."}, status=400)
-    if not documento.retroalimentacion.strip() and "calificacion" not in data:
-        return JsonResponse({"error": "La devolución debe incluir un comentario o una calificación."}, status=400)
-    nota_de_esta_devolucion = documento.calificacion if "calificacion" in data else None
-    DevolucionDocente.objects.create(proyecto=documento.proyecto, documento=documento, autor=request.user,
-                                     comentario=documento.retroalimentacion, calificacion=nota_de_esta_devolucion)
-    documento.evaluado_por = request.user
-    documento.save(update_fields=("retroalimentacion", "calificacion", "evaluado_por"))
-    return JsonResponse({"documento": _serializar(documento, request.user), "retroalimentacion": documento.retroalimentacion, "calificacion": str(documento.calificacion or "")})
+            devolucion.full_clean()
+        except ValidationError:
+            return JsonResponse({"error": "La devoluci?n no es v?lida."}, status=400)
+        devolucion.save()
+        documento.evaluado_por = request.user
+        documento.save(update_fields=("retroalimentacion", "calificacion", "evaluado_por"))
+
+    return JsonResponse({
+        "documento": _serializar(documento, request.user),
+        "retroalimentacion": documento.retroalimentacion,
+        "calificacion": str(documento.calificacion or ""),
+    })

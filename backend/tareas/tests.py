@@ -1,12 +1,14 @@
 import json
+import tempfile
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from proyectos.models import Proyecto
 from usuarios.models import PerfilUsuario
-from .models import Tarea
+from .models import Entrega, Tarea
 
 Usuario = get_user_model()
 
@@ -26,6 +28,12 @@ class TablerosTests(TestCase):
         return self.client.post(url, data=json.dumps(data), content_type="application/json")
 
     def setUp(self):
+        self._media = tempfile.TemporaryDirectory()
+        self.addCleanup(self._media.cleanup)
+        self._settings = override_settings(PRIVATE_MEDIA_ROOT=self._media.name)
+        self._settings.enable()
+        self.addCleanup(self._settings.disable)
+        Entrega._meta.get_field("archivo").storage.location = self._media.name
         self.alumno = self.crear_usuario("40100001")
         self.companero = self.crear_usuario("40100002")
         self.ajeno = self.crear_usuario("40100003")
@@ -162,6 +170,10 @@ class TablerosTests(TestCase):
         self.assertEqual(str(tarea.calificacion), "8.50")
         self.assertEqual(tarea.evaluado_por, self.profesor)
         self.assertEqual(tarea.retroalimentacion, "Buen trabajo.")
+        self.client.force_login(self.alumno)
+        consultada = self.client.get(reverse("api_tarea", args=[tarea.pk])).json()["tarea"]
+        self.assertEqual(consultada["calificacion"], "8.50")
+        self.assertEqual(consultada["retroalimentacion"], "Buen trabajo.")
         from proyectos.models import DevolucionDocente
         self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, autor=self.profesor).count(), 1)
 
@@ -204,3 +216,84 @@ class TablerosTests(TestCase):
         self.assertEqual(response.status_code, 400)
         response = self.json_post(reverse("api_tareas"), {"titulo": "Prioridad", "prioridad": "urgente"})
         self.assertEqual(response.status_code, 400)
+
+    def test_entrega_valida_se_lista_solo_al_alumno_y_docente_asignado(self):
+        proyecto = self.crear_proyecto()
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe")
+        url = reverse("api_entregas", args=[tarea.pk])
+        self.client.force_login(self.companero)
+        response = self.client.post(url, {"archivo": SimpleUploadedFile("informe.pdf", b"%PDF-1.7 test", content_type="application/pdf")})
+        self.assertEqual(response.status_code, 201, response.content)
+        entrega = Entrega.objects.get()
+        self.assertEqual(entrega.alumno, self.companero)
+        self.assertEqual(self.client.get(url).json()["entregas"][0]["id"], entrega.pk)
+        self.client.force_login(self.alumno)
+        self.assertEqual(self.client.get(url).json()["entregas"], [])
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        proyecto.profesores.add(self.profesor)
+        self.assertEqual(self.client.get(url).status_code, 200)
+        self.assertEqual(len(self.client.get(url).json()["entregas"]), 1)
+        descarga = self.client.get(reverse("descargar_entrega", args=[entrega.pk]))
+        self.assertEqual(descarga.status_code, 200)
+        self.assertEqual(descarga["X-Content-Type-Options"], "nosniff")
+        self.assertIn("private", descarga["Cache-Control"])
+        descarga.close()
+
+    def test_entrega_rechaza_no_miembro_archivo_invalido_grande_y_duplicado(self):
+        proyecto = self.crear_proyecto()
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe")
+        url = reverse("api_entregas", args=[tarea.pk])
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.post(url, {"archivo": SimpleUploadedFile("x.pdf", b"%PDF-x")}).status_code, 404)
+        self.client.force_login(self.companero)
+        self.assertEqual(self.client.post(url, {"archivo": SimpleUploadedFile("x.exe", b"bad")}).status_code, 400)
+        self.assertEqual(self.client.post(url, {"archivo": SimpleUploadedFile("x.pdf", b"x" * (10 * 1024 * 1024 + 1))}).status_code, 400)
+        data = {"archivo": SimpleUploadedFile("x.pdf", b"%PDF-1.7")}
+        self.assertEqual(self.client.post(url, data).status_code, 201)
+        self.assertEqual(self.client.post(url, {"archivo": SimpleUploadedFile("y.pdf", b"%PDF-1.7")}).status_code, 409)
+
+    def test_descarga_privada_autorizada_y_revocada_al_retirar_integrante(self):
+        proyecto = self.crear_proyecto()
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe")
+        self.client.force_login(self.companero)
+        response = self.client.post(reverse("api_entregas", args=[tarea.pk]), {"archivo": SimpleUploadedFile("x.pdf", b"%PDF-1.7")})
+        entrega = Entrega.objects.get(pk=response.json()["entrega"]["id"])
+        url = reverse("descargar_entrega", args=[entrega.pk])
+        descarga = self.client.get(url)
+        self.assertEqual(descarga.status_code, 200)
+        descarga.close()
+        proyecto.integrantes.remove(self.companero)
+        self.assertEqual(self.client.get(url).status_code, 404)
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.get(url).status_code, 404)
+
+    def test_calificacion_rechaza_exceso_de_rango_y_precision(self):
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe")
+        self.client.force_login(self.profesor)
+        url = reverse("api_calificar_tarea", args=[tarea.pk])
+        for nota in ("10.01", "8.555", "NaN", "texto"):
+            response = self.client.patch(url, data=json.dumps({"calificacion": nota}), content_type="application/json")
+            self.assertEqual(response.status_code, 400, nota)
+        self.assertFalse(tarea.devoluciones.exists())
+
+    def test_retirar_integrante_revoca_tareas_y_recalcula_progreso_al_eliminar(self):
+        proyecto = self.crear_proyecto()
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Completada", estado="completada")
+        proyecto.actualizar_progreso()
+        proyecto.refresh_from_db()
+        self.assertEqual(proyecto.progreso, 100)
+        self.client.force_login(self.alumno)
+        self.assertEqual(self.client.patch(
+            reverse("api_proyecto", args=[proyecto.pk]),
+            data=json.dumps({"integrantes": []}), content_type="application/json",
+        ).status_code, 200)
+        self.client.force_login(self.companero)
+        self.assertEqual(self.client.get(reverse("api_tarea", args=[tarea.pk])).status_code, 404)
+        self.assertEqual(self.client.patch(reverse("api_tarea", args=[tarea.pk]), data=json.dumps({"estado": "pendiente"}), content_type="application/json").status_code, 404)
+        self.client.force_login(self.alumno)
+        self.assertEqual(self.client.delete(reverse("api_tarea", args=[tarea.pk])).status_code, 200)
+        proyecto.refresh_from_db()
+        self.assertEqual(proyecto.progreso, 0)

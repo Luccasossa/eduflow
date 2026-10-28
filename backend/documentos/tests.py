@@ -124,6 +124,30 @@ class DocumentosTests(TestCase):
             data=json.dumps({"retroalimentacion": "Sin autorización"}), content_type="application/json",
         ).status_code, 404)
 
+    def test_calificacion_documento_respeta_rango_precision_y_registra_historial_solo_al_validar(self):
+        proyecto = Proyecto.objects.create(nombre="Proyecto", creador=self.alumno)
+        proyecto.profesores.add(self.profesor)
+        documento = Documento.objects.create(titulo="Informe", creador=self.alumno, proyecto=proyecto)
+        self.client.force_login(self.profesor)
+        url = reverse("api_evaluar_documento", args=[documento.pk])
+        for calificacion in ("10.01", "8.555", "NaN", "texto"):
+            response = self.client.patch(
+                url, data=json.dumps({"calificacion": calificacion}),
+                content_type="application/json",
+            )
+            self.assertEqual(response.status_code, 400, calificacion)
+        self.assertFalse(documento.devoluciones.exists())
+        response = self.client.patch(
+            url, data=json.dumps({"calificacion": "9.25", "retroalimentacion": "Bien"}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200)
+        self.client.force_login(self.alumno)
+        self.assertEqual(
+            self.client.get(reverse("api_documento", args=[documento.pk])).json()["documento"]["calificacion"],
+            "9.25",
+        )
+
     def test_profesor_crea_y_edita_su_documento_de_catedra_privado(self):
         self.client.force_login(self.profesor)
         response = self.post_json(reverse("api_documentos"), {"titulo": "Guía", "contenido": "Borrador"})
