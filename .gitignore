@@ -1,11 +1,31 @@
+
+# Variables de entorno
 .env
 .env.*
 !.env.example
+.envrc
+.aws/
+.secrets/
+*.key
+*.p12
+*.pfx
+
+# Entornos virtuales
 venv/
 .venv/
+
+# Archivos Python
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Bases de datos locales
+*.sqlite3
+
+# Archivos multimedia
+media/
+private_media/
+
 # Respaldos locales de archivos
-media_respaldo_*/
-private_media_respaldo_*/
+media_respaldo*/
+private_media_respaldo*/
 *.bak

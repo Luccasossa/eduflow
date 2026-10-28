@@ -4,12 +4,12 @@ from unittest.mock import patch
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.core.files.storage import FileSystemStorage
-from django.test import TestCase
+from django.test import Client, TestCase
 from django.urls import reverse
 
 from proyectos.models import Proyecto
 from usuarios.models import PerfilUsuario
-from .models import Archivo
+from .models import Archivo, Carpeta
 
 Usuario = get_user_model()
 
@@ -108,3 +108,79 @@ class ArchivosTests(TestCase):
         descarga = self.client.get(reverse("descargar_archivo", args=[archivo.id]))
         self.assertEqual(descarga.status_code, 200)
         descarga.close()
+
+    def test_carpetas_solo_visibles_para_su_propietario_y_nombre_validado(self):
+        self.client.force_login(self.alumno)
+        response = self.client.post(reverse("api_carpetas"), {"nombre": "  Material  "})
+        self.assertEqual(response.status_code, 201)
+        carpeta = Carpeta.objects.get()
+        self.assertEqual(carpeta.nombre, "Material")
+        self.assertEqual(response.json()["carpeta"], {"id": carpeta.id, "nombre": "Material"})
+        self.assertEqual(self.client.get(reverse("api_carpetas")).json()["carpetas"], [{"id": carpeta.id, "nombre": "Material"}])
+
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.get(reverse("api_carpetas")).json()["carpetas"], [])
+        self.assertEqual(self.client.post(reverse("api_archivos"), {
+            "archivo": SimpleUploadedFile("guia.pdf", b"%PDF-1.4\ncontenido", "application/pdf"),
+            "carpeta": carpeta.id,
+        }).status_code, 404)
+        for nombre in ("", " " * 2, "../privado", "x" * 151):
+            self.assertEqual(self.client.post(reverse("api_carpetas"), {"nombre": nombre}).status_code, 400)
+
+    def test_listado_filtra_por_proyecto_y_carpeta_y_no_expone_archivos_ajenos(self):
+        proyecto = Proyecto.objects.create(nombre="Equipo", creador=self.alumno)
+        proyecto.integrantes.add(self.alumno, self.ajeno)
+        carpeta = Carpeta.objects.create(nombre="Equipo", propietario=self.alumno)
+        self.client.force_login(self.alumno)
+        response = self.upload(proyecto=proyecto.id, carpeta=carpeta.id)
+        self.assertEqual(response.status_code, 201, response.content)
+        compartido = Archivo.objects.get()
+        self.client.force_login(self.ajeno)
+        listed = self.client.get(reverse("api_archivos"), {"proyecto": proyecto.id}).json()["archivos"]
+        self.assertEqual([item["id"] for item in listed], [compartido.id])
+        self.assertEqual(set(listed[0]), {"id", "nombre", "tamano", "fecha_subida", "proyecto_id", "descarga"})
+        self.assertEqual(listed[0]["nombre"], "guia.pdf")
+        self.assertEqual(listed[0]["proyecto_id"], proyecto.id)
+        self.assertEqual(self.client.get(reverse("api_archivos"), {"carpeta": carpeta.id}).status_code, 404)
+
+    def test_subida_tarea_valida_vinculo_y_restringe_tarea_ajena(self):
+        from tareas.models import Tarea
+
+        proyecto = Proyecto.objects.create(nombre="Equipo", creador=self.alumno)
+        proyecto.integrantes.add(self.alumno, self.ajeno)
+        tarea = Tarea.objects.create(titulo="Entrega", creador=self.alumno, proyecto=proyecto)
+        otro_proyecto = Proyecto.objects.create(nombre="Otro", creador=self.alumno)
+        self.client.force_login(self.alumno)
+        response = self.upload(tarea=tarea.id)
+        self.assertEqual(response.status_code, 201, response.content)
+        archivo = Archivo.objects.get()
+        self.assertEqual(archivo.tarea, tarea)
+        self.assertEqual(archivo.proyecto, proyecto)
+        self.assertEqual(self.upload("otro.pdf", b"%PDF-1.4\ncontenido", proyecto=otro_proyecto.id, tarea=tarea.id).status_code, 400)
+
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.upload("intruso.pdf", b"%PDF-1.4\ncontenido", tarea=tarea.id).status_code, 201)
+
+    def test_rechaza_carga_sin_archivo_y_ids_malformados(self):
+        self.client.force_login(self.alumno)
+        self.assertEqual(self.client.post(reverse("api_archivos")).status_code, 400)
+        response = self.client.post(reverse("api_archivos"), {
+            "archivo": SimpleUploadedFile("guia.pdf", b"%PDF-1.4\ncontenido", "application/pdf"),
+            "proyecto": "no-es-un-id",
+        })
+        self.assertEqual(response.status_code, 400)
+
+    def test_descarga_requiere_autenticacion_y_rechaza_archivo_ajeno(self):
+        self.client.force_login(self.alumno)
+        self.upload()
+        archivo = Archivo.objects.get()
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse("descargar_archivo", args=[archivo.id])).status_code, 302)
+
+    def test_post_de_archivos_y_carpetas_exige_csrf(self):
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.alumno)
+        self.assertEqual(client.post(reverse("api_carpetas"), {"nombre": "Material"}).status_code, 403)
+        self.assertEqual(client.post(reverse("api_archivos"), {
+            "archivo": SimpleUploadedFile("guia.pdf", b"%PDF-1.4\ncontenido", "application/pdf"),
+        }).status_code, 403)
