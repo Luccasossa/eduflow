@@ -14,6 +14,7 @@ https://docs.djangoproject.com/en/6.1/ref/settings/
 import os
 from pathlib import Path
 from dotenv import load_dotenv
+from config.db_ssl import resolve_db_ssl_ca
 
 # Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -100,18 +101,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
 
 # Ruta del certificado SSL de Aiven
-DB_SSL_CA = os.getenv("DB_SSL_CA", "").strip()
-
-if not DB_SSL_CA:
-    DB_SSL_CA = str(BASE_DIR / "certificados" / "ca (2).pem")
-elif not os.path.isabs(DB_SSL_CA):
-    DB_SSL_CA = str(BASE_DIR / DB_SSL_CA)
-
-
-DB_SSL_CA = os.getenv(
-    "DB_SSL_CA",
-    str(BASE_DIR / "certificados" / "ca (2).pem")
-)
+DB_SSL_CA = resolve_db_ssl_ca(os.getenv("DB_SSL_CA", ""), BASE_DIR)
 
 
 DATABASES = {
