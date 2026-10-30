@@ -3,6 +3,7 @@ from datetime import date
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.db.models import Q
 from django.db.models import ProtectedError
 from django import forms
 from django.core.exceptions import ValidationError
@@ -53,6 +54,10 @@ def _proyecto_visible(request, pk):
 
 def _serializar_proyecto(proyecto, usuario=None):
     tareas = list(proyecto.tareas.all().order_by("fecha_vencimiento", "id"))
+    integrantes = list(proyecto.integrantes.all())
+    if not any(miembro.pk == proyecto.creador_id for miembro in integrantes):
+        integrantes.append(proyecto.creador)
+    integrantes.sort(key=lambda miembro: (miembro.first_name.lower(), miembro.last_name.lower(), miembro.dni))
     total = len(tareas)
     completadas = sum(t.estado == "completada" for t in tareas)
     progreso = round(completadas * 100 / total) if total else 0
@@ -66,7 +71,7 @@ def _serializar_proyecto(proyecto, usuario=None):
         "puede_editar": bool(usuario and _rol(usuario) == "alumno" and proyecto.creador_id == usuario.id),
         "integrantes": [
             {"id": miembro.id, "nombre": miembro.get_full_name() or miembro.dni}
-            for miembro in proyecto.integrantes.all().order_by("first_name", "last_name", "dni")
+            for miembro in integrantes
         ],
         "tareas": [
             {
@@ -83,8 +88,24 @@ def _serializar_proyecto(proyecto, usuario=None):
             }
             for tarea in tareas
         ],
-        "devoluciones": [_serializar_devolucion(d) for d in proyecto.devoluciones.select_related("autor", "tarea", "documento").all()],
+        "devoluciones": [
+            _serializar_devolucion(d)
+            for d in _devoluciones_visibles(proyecto, usuario)
+        ],
     }
+
+
+def _devoluciones_visibles(proyecto, usuario):
+    entries = proyecto.devoluciones.select_related(
+        "autor", "tarea", "documento", "alumno", "anulada_por",
+    ).all()
+    if usuario and _rol(usuario) == "alumno":
+        entries = entries.filter(
+            Q(tipo="historica")
+            | Q(tipo="grupal", anulada_en__isnull=True)
+            | Q(tipo="individual", alumno=usuario, anulada_en__isnull=True)
+        )
+    return entries
 
 
 def _serializar_devolucion(d):
@@ -98,6 +119,12 @@ def _serializar_devolucion(d):
         "tarea": d.tarea.titulo if d.tarea_id else "",
         "documento_id": d.documento_id,
         "documento": d.documento.titulo if d.documento_id else "",
+        "tipo": d.tipo,
+        "alumno_id": d.alumno_id,
+        "alumno": (d.alumno.get_full_name() or d.alumno.dni) if d.alumno_id else "",
+        "anulada": d.anulada_en is not None,
+        "anulada_en": d.anulada_en.isoformat() if d.anulada_en else "",
+        "anulada_por": (d.anulada_por.get_full_name() or d.anulada_por.dni) if d.anulada_por_id else "",
     }
 
 
@@ -212,7 +239,7 @@ def api_devoluciones(request, pk):
     if request.method == "GET":
         if not (profesor_autorizado(request.user, proyecto) or alumno_integrante(request.user, proyecto)):
             raise Http404
-        entries = proyecto.devoluciones.select_related("autor", "tarea", "documento").all()
+        entries = _devoluciones_visibles(proyecto, request.user)
         return JsonResponse({"devoluciones": [_serializar_devolucion(d) for d in entries]})
     if not profesor_autorizado(request.user, proyecto):
         return JsonResponse({"error": "No tienes autorización para evaluar este proyecto."}, status=403)

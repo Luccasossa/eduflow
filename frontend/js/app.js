@@ -503,6 +503,73 @@
                 details.appendChild(make("strong", "", task.titulo));
                 details.appendChild(make("small", "", `${states.find(([value]) => value === task.estado)?.[1] || task.estado} · ${task.prioridad} · ${dateLabel(task.fecha_vencimiento)}`));
                 row.appendChild(details);
+
+                const deliveryPanel = make("div", "group-delivery-panel");
+                deliveryPanel.appendChild(make("strong", "", "Entrega grupal"));
+                if (task.entregas?.length) {
+                    task.entregas.forEach((delivery) => {
+                        const info = make("p", "", `Entrega #${delivery.id} · ${delivery.alumno} · ${dateLabel(delivery.fecha_entrega.slice(0, 10))} · ${delivery.estado}`);
+                        deliveryPanel.appendChild(info);
+                        const download = make("a", "text-button", `Descargar ${delivery.nombre}`);
+                        download.href = delivery.descarga;
+                        deliveryPanel.appendChild(download);
+                        if (/\.(pdf|png|jpe?g)$/i.test(delivery.nombre)) {
+                            const preview = make("a", "text-button", "Abrir en el navegador");
+                            preview.href = `${delivery.descarga}?inline=1`;
+                            preview.target = "_blank";
+                            preview.rel = "noopener noreferrer";
+                            deliveryPanel.appendChild(preview);
+                        }
+                    });
+                    deliveryPanel.appendChild(make("small", "", "La entrega queda disponible para todo el grupo."));
+                } else {
+                    deliveryPanel.appendChild(make("p", "", "El grupo todavía no realizó la entrega."));
+                    const file = document.createElement("input");
+                    file.type = "file";
+                    file.accept = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg";
+                    file.setAttribute("aria-label", `Archivo para entregar: ${task.titulo}`);
+                    const submit = make("button", "text-button", "Entregar archivo por el grupo");
+                    submit.type = "button";
+                    submit.disabled = true;
+                    file.addEventListener("change", () => { submit.disabled = !file.files?.length; });
+                    submit.addEventListener("click", async () => {
+                        const uploaded = file.files?.[0];
+                        if (!uploaded) return;
+                        submit.disabled = true;
+                        try {
+                            const body = new FormData();
+                            body.append("archivo", uploaded);
+                            const response = await fetch(`${taskUrl}${task.id}/entregas/`, {
+                                method: "POST",
+                                headers: { Accept: "application/json", "X-CSRFToken": csrf },
+                                body,
+                            });
+                            let result = {};
+                            try { result = await response.json(); } catch (_) { /* error genérico */ }
+                            if (response.status === 409) {
+                                await loadProjects();
+                                notify(result.error || "El grupo ya realizó la entrega.", true);
+                                return;
+                            }
+                            if (!response.ok) throw new Error(result.error || "No se pudo entregar el archivo.");
+                            await loadProjects();
+                            notify("Entrega grupal registrada.");
+                        } catch (error) {
+                            notify(error.message, true);
+                            submit.disabled = !file.files?.length;
+                        }
+                    });
+                    deliveryPanel.append(file, submit);
+                }
+                if (task.evaluacion_grupal) {
+                    const evaluation = task.evaluacion_grupal;
+                    deliveryPanel.appendChild(make("p", "", `Evaluación grupal: ${evaluation.calificacion || "Sin nota"}${evaluation.comentario ? ` · ${evaluation.comentario}` : ""}`));
+                }
+                const personalEvaluation = task.evaluacion_individual;
+                if (personalEvaluation) {
+                    deliveryPanel.appendChild(make("p", "", `Tu evaluación individual: ${personalEvaluation.calificacion || "Sin nota"}${personalEvaluation.comentario ? ` · ${personalEvaluation.comentario}` : ""}`));
+                }
+                row.appendChild(deliveryPanel);
                 const editTask = make("button", "text-button", "Editar");
                 editTask.type = "button";
                 editTask.addEventListener("click", () => openTask(task));
@@ -515,6 +582,10 @@
                 feedback.appendChild(make("h4", "", "Devoluciones docentes"));
                 project.devoluciones.forEach((entry) => {
                     const item = make("article", "project-feedback-entry");
+                    const label = entry.tipo === "grupal" ? "Evaluación grupal"
+                        : entry.tipo === "individual" ? `Evaluación individual · ${entry.alumno}`
+                            : "Registro histórico";
+                    item.appendChild(make("strong", "", label));
                     item.appendChild(make("strong", "", `${entry.autor} · ${entry.fecha.slice(0, 10)}`));
                     if (entry.tarea || entry.documento) item.appendChild(make("small", "", `Sobre ${entry.tarea || entry.documento}`));
                     if (entry.comentario) item.appendChild(make("p", "", entry.comentario));
@@ -531,6 +602,15 @@
     async function loadProjects() {
         try {
             projects = (await api(projectUrl)).proyectos;
+            await Promise.all(projects.flatMap((project) => project.tareas.map(async (task) => {
+                const [deliveries, evaluations] = await Promise.all([
+                    api(`${taskUrl}${task.id}/entregas/`),
+                    api(`${taskUrl}${task.id}/evaluaciones/`),
+                ]);
+                task.entregas = deliveries.entregas;
+                task.evaluacion_grupal = evaluations.grupal;
+                task.evaluacion_individual = evaluations.individuales[0] || null;
+            })));
             renderProjects();
         } catch (error) { notify(error.message, true); }
     }

@@ -44,13 +44,35 @@ class Proyecto(models.Model):
 
 class DevolucionDocente(models.Model):
     """Entrada inmutable de evaluación o retroalimentación asociada al proyecto."""
+    TIPOS = [
+        ("historica", "Histórica"),
+        ("grupal", "Grupal"),
+        ("individual", "Individual"),
+    ]
+
     proyecto = models.ForeignKey(Proyecto, on_delete=models.PROTECT, related_name="devoluciones")
     tarea = models.ForeignKey("tareas.Tarea", on_delete=models.SET_NULL, null=True, blank=True, related_name="devoluciones")
     documento = models.ForeignKey("documentos.Documento", on_delete=models.SET_NULL, null=True, blank=True, related_name="devoluciones")
     autor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="devoluciones_docentes")
+    tipo = models.CharField(max_length=12, choices=TIPOS, default="historica")
+    alumno = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="evaluaciones_individuales",
+    )
     comentario = models.TextField(blank=True)
     calificacion = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
+    anulada_en = models.DateTimeField(null=True, blank=True)
+    anulada_por = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="devoluciones_anuladas",
+    )
 
     class Meta:
         ordering = ("-fecha_creacion", "-pk")
@@ -63,6 +85,20 @@ class DevolucionDocente(models.Model):
             raise ValidationError({"tarea": "La tarea debe pertenecer al proyecto indicado."})
         if self.documento_id and self.documento.proyecto_id != self.proyecto_id:
             raise ValidationError({"documento": "El documento debe pertenecer al proyecto indicado."})
+        if self.tipo == "grupal" and (not self.tarea_id or self.alumno_id):
+            raise ValidationError("La evaluación grupal requiere una tarea y no un alumno individual.")
+        if self.tipo == "individual":
+            if not self.tarea_id or not self.alumno_id:
+                raise ValidationError("La evaluación individual requiere una tarea y un alumno.")
+            if self.tarea.proyecto_id != self.proyecto_id:
+                raise ValidationError({"tarea": "La tarea debe pertenecer al proyecto indicado."})
+            if not (self.tarea.proyecto.creador_id == self.alumno_id or
+                    self.tarea.proyecto.integrantes.filter(pk=self.alumno_id).exists()):
+                raise ValidationError({"alumno": "El alumno debe pertenecer al proyecto de la tarea."})
+        if self.tipo == "historica" and self.alumno_id:
+            raise ValidationError("Las evaluaciones históricas no pueden tener un alumno asignado.")
+        if bool(self.anulada_en) != bool(self.anulada_por_id):
+            raise ValidationError("La anulación debe registrar fecha y docente responsable.")
         if not self.comentario.strip() and self.calificacion is None:
             raise ValidationError("La devolución debe incluir un comentario o una calificación.")
 

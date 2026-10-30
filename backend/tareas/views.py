@@ -1,11 +1,13 @@
 import json
+import mimetypes
 from datetime import date
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, OperationalError, transaction
 from django.contrib.auth.decorators import login_required
 from django import forms
 from django.core.exceptions import ValidationError
 from django.http import FileResponse, Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
+from django.utils import timezone
 from django.views.decorators.http import require_http_methods
 from django.conf import settings
 
@@ -26,6 +28,28 @@ def _json_body(request):
     except (json.JSONDecodeError, UnicodeDecodeError):
         return None
     return data if isinstance(data, dict) else None
+
+
+def _es_conflicto_concurrencia(error):
+    code = error.args[0] if error.args and isinstance(error.args[0], int) else None
+    return code in (5, 6, 1205, 1213) or "database is locked" in str(error).lower()
+
+
+def _manejar_conflicto_concurrencia(view):
+    from functools import wraps
+
+    @wraps(view)
+    def wrapped(request, *args, **kwargs):
+        try:
+            return view(request, *args, **kwargs)
+        except OperationalError as exc:
+            if not _es_conflicto_concurrencia(exc):
+                raise
+            return JsonResponse(
+                {"error": "La operación coincidió con otra solicitud. Actualiza y vuelve a intentar."},
+                status=409,
+            )
+    return wrapped
 
 
 def _fecha(value):
@@ -243,6 +267,8 @@ def _serializar_entrega(entrega):
         "id": entrega.pk,
         "tarea_id": entrega.tarea_id,
         "alumno_id": entrega.alumno_id,
+        "alumno": entrega.alumno.get_full_name() or entrega.alumno.dni,
+        "grupo_id": entrega.tarea.proyecto_id,
         "nombre": entrega.archivo.name.rsplit("/", 1)[-1],
         "fecha_entrega": entrega.fecha_entrega.isoformat(),
         "estado": entrega.estado,
@@ -251,13 +277,162 @@ def _serializar_entrega(entrega):
     }
 
 
+def _serializar_evaluacion(evaluacion):
+    return {
+        "id": evaluacion.pk,
+        "tipo": evaluacion.tipo,
+        "tarea_id": evaluacion.tarea_id,
+        "alumno_id": evaluacion.alumno_id,
+        "alumno": (evaluacion.alumno.get_full_name() or evaluacion.alumno.dni)
+        if evaluacion.alumno_id else "",
+        "calificacion": str(evaluacion.calificacion) if evaluacion.calificacion is not None else "",
+        "comentario": evaluacion.comentario,
+        "autor": evaluacion.autor.get_full_name() or evaluacion.autor.dni,
+        "fecha": evaluacion.fecha_creacion.isoformat(),
+    }
+
+
+def _evaluaciones_vigentes(tarea):
+    from proyectos.models import DevolucionDocente
+
+    entries = DevolucionDocente.objects.filter(tarea=tarea, anulada_en__isnull=True)
+    grupal = entries.filter(tipo="grupal").select_related("autor").order_by("-fecha_creacion", "-pk").first()
+    individuales = entries.filter(tipo="individual").select_related("autor", "alumno").order_by("alumno_id", "-fecha_creacion", "-pk")
+    return grupal, individuales
+
+
+@login_required
+@require_http_methods(["GET"])
+def api_evaluaciones(request, pk):
+    tarea = _tarea_autorizada(request, pk)
+    if tarea.proyecto_id is None:
+        raise Http404
+    grupal, individuales = _evaluaciones_vigentes(tarea)
+    if _rol(request.user) == "alumno":
+        individuales = individuales.filter(alumno=request.user)
+    return JsonResponse({
+        "grupal": _serializar_evaluacion(grupal) if grupal else None,
+        "individuales": [_serializar_evaluacion(item) for item in individuales],
+    })
+
+
+def _guardar_o_anular_evaluacion(request, pk, tipo, alumno_id=None):
+    if _rol(request.user) != "profesor":
+        return JsonResponse({"error": "Solo el docente autorizado puede gestionar evaluaciones."}, status=403)
+
+    tarea = get_object_or_404(Tarea.objects.select_related("proyecto"), pk=pk, proyecto__isnull=False)
+    if not profesor_autorizado(request.user, tarea.proyecto):
+        raise Http404
+
+    alumno = None
+    if tipo == "individual":
+        from usuarios.models import Usuario
+
+        alumno = get_object_or_404(Usuario.objects.filter(perfil__rol="alumno", is_active=True), pk=alumno_id)
+        if not (tarea.proyecto.creador_id == alumno.pk or tarea.proyecto.integrantes.filter(pk=alumno.pk).exists()):
+            raise Http404
+
+    if request.method != "DELETE":
+        data = _json_body(request)
+        if data is None:
+            return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON válido."}, status=400)
+        try:
+            raw_grade = data.get("calificacion", "")
+            grade = None if raw_grade in (None, "") else forms.DecimalField(
+                max_digits=5,
+                decimal_places=2,
+                min_value=0,
+                max_value=settings.EDUFLOW_GRADE_MAX,
+            ).clean(raw_grade)
+            comment = data.get("comentario", data.get("retroalimentacion", ""))
+            if not isinstance(comment, str) or len(comment) > 20000:
+                raise ValueError
+            comment = comment.strip()
+            if grade is None and not comment:
+                raise ValueError
+        except (ValidationError, ValueError, TypeError):
+            return JsonResponse({"error": "La calificación o devolución no es válida."}, status=400)
+
+    from proyectos.models import DevolucionDocente
+
+    with transaction.atomic():
+        tarea = get_object_or_404(
+            Tarea.objects.select_for_update().select_related("proyecto"),
+            pk=pk,
+            proyecto__isnull=False,
+        )
+        if not profesor_autorizado(request.user, tarea.proyecto):
+            raise Http404
+        if alumno_id is not None and not (
+            tarea.proyecto.creador_id == alumno_id
+            or tarea.proyecto.integrantes.filter(pk=alumno_id).exists()
+        ):
+            raise Http404
+
+        actuales = DevolucionDocente.objects.filter(
+            tarea=tarea,
+            tipo=tipo,
+            anulada_en__isnull=True,
+        )
+        if alumno_id is not None:
+            actuales = actuales.filter(alumno_id=alumno_id)
+        else:
+            actuales = actuales.filter(alumno__isnull=True)
+
+        if request.method == "DELETE":
+            if not actuales.exists():
+                raise Http404
+            actuales.update(anulada_en=timezone.now(), anulada_por=request.user)
+            return JsonResponse({"eliminada": True})
+
+        evaluacion = DevolucionDocente(
+            proyecto=tarea.proyecto,
+            tarea=tarea,
+            autor=request.user,
+            tipo=tipo,
+            alumno=alumno,
+            calificacion=grade,
+            comentario=comment,
+        )
+        try:
+            evaluacion.full_clean()
+        except ValidationError:
+            return JsonResponse({"error": "La evaluación no coincide con la tarea y el grupo."}, status=400)
+        vigente = actuales.select_related("autor", "alumno").order_by("-fecha_creacion", "-pk")
+        if vigente.count() == 1:
+            existente = vigente.first()
+            if existente.calificacion == grade and existente.comentario == comment:
+                return JsonResponse({
+                    "evaluacion": _serializar_evaluacion(existente),
+                    "sin_cambios": True,
+                })
+        # Retire the previous current version only after the replacement validates.
+        actuales.update(anulada_en=timezone.now(), anulada_por=request.user)
+        evaluacion.save()
+    return JsonResponse({"evaluacion": _serializar_evaluacion(evaluacion)}, status=201)
+
+
+@login_required
+@require_http_methods(["POST", "PUT", "DELETE"])
+@_manejar_conflicto_concurrencia
+def api_evaluacion_grupal(request, pk):
+    return _guardar_o_anular_evaluacion(request, pk, "grupal")
+
+
+@login_required
+@require_http_methods(["POST", "PUT", "DELETE"])
+@_manejar_conflicto_concurrencia
+def api_evaluacion_individual(request, pk, alumno_id):
+    return _guardar_o_anular_evaluacion(request, pk, "individual", alumno_id)
+
+
 @login_required
 @require_http_methods(["GET", "POST"])
 def api_entregas(request, pk):
     tarea = _tarea_autorizada(request, pk)
     if request.method == "GET":
-        entregas = Entrega.objects.filter(tarea=tarea).select_related("alumno")
-        if _rol(request.user) == "alumno":
+        entregas = Entrega.objects.filter(tarea=tarea).select_related("alumno", "tarea__proyecto")
+        if _rol(request.user) == "alumno" and tarea.proyecto_id is None:
             entregas = entregas.filter(alumno=request.user)
         return JsonResponse({"entregas": [_serializar_entrega(item) for item in entregas]})
 
@@ -269,19 +444,40 @@ def api_entregas(request, pk):
     observaciones = request.POST.get("observaciones", "").strip()
     if len(observaciones) > 20000:
         return JsonResponse({"error": "Las observaciones superan el límite permitido."}, status=400)
-    if Entrega.objects.filter(tarea=tarea, alumno=request.user).exists():
-        return JsonResponse({"error": "Ya existe una entrega para esta tarea."}, status=409)
     entrega = Entrega(tarea=tarea, alumno=request.user, archivo=archivo, observaciones=observaciones)
     try:
-        entrega.full_clean()
         with transaction.atomic():
+            tarea = get_object_or_404(
+                Tarea.objects.select_for_update().select_related("proyecto"),
+                pk=pk,
+            )
+            tarea = _tarea_autorizada(request, tarea.pk)
+            existentes = Entrega.objects.filter(tarea=tarea)
+            if tarea.proyecto_id is None:
+                existentes = existentes.filter(alumno=request.user)
+            if existentes.exists():
+                return JsonResponse({
+                    "error": "El grupo ya realizó la entrega." if tarea.proyecto_id else "Ya existe una entrega para esta tarea.",
+                    "entregas": [_serializar_entrega(item) for item in existentes.select_related("alumno", "tarea__proyecto")],
+                }, status=409)
+            entrega.tarea = tarea
+            entrega.full_clean()
             entrega.save()
     except ValidationError as exc:
         return JsonResponse({"error": exc.messages}, status=400)
     except IntegrityError:
-        if entrega.archivo.name:
+        if entrega.archivo.name and entrega.archivo._committed:
             entrega.archivo.storage.delete(entrega.archivo.name)
         return JsonResponse({"error": "Ya existe una entrega para esta tarea."}, status=409)
+    except OperationalError as exc:
+        if entrega.archivo.name and entrega.archivo._committed:
+            entrega.archivo.storage.delete(entrega.archivo.name)
+        if _es_conflicto_concurrencia(exc):
+            return JsonResponse(
+                {"error": "La operación coincidió con otra entrega. Actualiza y vuelve a intentar."},
+                status=409,
+            )
+        raise
     return JsonResponse({"entrega": _serializar_entrega(entrega)}, status=201)
 
 
@@ -292,11 +488,13 @@ def descargar_entrega(request, pk):
     tarea = entrega.tarea
     rol = _rol(request.user)
     autorizado = (
-        rol == "alumno" and entrega.alumno_id == request.user.id
-        and (tarea.proyecto_id is None or (
+        rol == "alumno" and (
+            (tarea.proyecto_id is None and entrega.alumno_id == request.user.id)
+            or (tarea.proyecto_id is not None and (
             tarea.proyecto.creador_id == request.user.id
             or tarea.proyecto.integrantes.filter(pk=request.user.pk).exists()
-        ))
+            ))
+        )
     ) or (
         rol == "profesor" and tarea.proyecto_id is not None
         and profesor_autorizado(request.user, tarea.proyecto)
@@ -304,13 +502,20 @@ def descargar_entrega(request, pk):
     if not autorizado:
         raise Http404
     try:
+        filename = entrega.archivo.name.rsplit("/", 1)[-1]
+        content_type = mimetypes.guess_type(filename)[0] or "application/octet-stream"
+        can_preview = content_type in {"application/pdf", "image/png", "image/jpeg"}
+        inline = request.GET.get("inline") == "1" and can_preview
         response = FileResponse(
-            entrega.archivo.open("rb"), as_attachment=True,
-            filename=entrega.archivo.name.rsplit("/", 1)[-1],
+            entrega.archivo.open("rb"),
+            as_attachment=not inline,
+            filename=filename,
+            content_type=content_type,
         )
     except (FileNotFoundError, ValueError):
         raise Http404
     response["X-Content-Type-Options"] = "nosniff"
+    response["Content-Security-Policy"] = "sandbox"
     response["Cache-Control"] = "private, no-store"
     return response
 

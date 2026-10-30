@@ -1521,14 +1521,17 @@ nav {
             <p id="evaluationTaskTitle" class="muted"></p>
             <div class="form-field">
                 <label for="evaluationGrade">Calificación</label>
-                <input id="evaluationGrade" type="number" min="0" max="999.99" step="0.01" required>
+                <input id="evaluationGrade" type="number" min="0" max="{{ calificacion_maxima }}" step="0.01" required>
             </div>
             <div class="form-field">
                 <label for="evaluationFeedback">Retroalimentación</label>
                 <textarea id="evaluationFeedback" rows="5" maxlength="20000"></textarea>
             </div>
+            <h3>Evaluaciones individuales</h3>
+            <div id="individualEvaluationList"></div>
             <p id="evaluationError" class="form-error" role="alert"></p>
             <div class="modal-actions">
+                <button type="button" class="danger-button" id="deleteGroupEvaluationBtn" hidden>Eliminar evaluación grupal</button>
                 <button type="button" class="secondary-button" data-close>Cancelar</button>
                 <button type="submit" class="primary-button">Guardar evaluación</button>
             </div>
@@ -1573,6 +1576,7 @@ nav {
             name: project.nombre,
             dueDate: project.fecha_entrega,
             members: project.integrantes.map(function (member) { return member.nombre; }),
+            memberRecords: project.integrantes,
             progress: project.progreso,
             devoluciones: project.devoluciones || [],
             status: project.progreso === 100
@@ -1587,7 +1591,10 @@ nav {
                     column: task.estado === 'completada' ? 'done' : (task.estado === 'en_progreso' ? 'progress' : 'todo'),
                     priority: task.prioridad,
                     grade: task.calificacion,
-                    feedback: task.retroalimentacion
+                    feedback: task.retroalimentacion,
+                    deliveries: [],
+                    groupEvaluation: null,
+                    individualEvaluations: []
                 };
             }),
             docs: []
@@ -1622,13 +1629,23 @@ nav {
         return Promise.all([requestJson('/proyectos/api/'), requestJson('/documentos/api/')])
             .then(function (results) {
                 var docs = results[1].documentos;
-                projects = results[0].proyectos.map(function (project) {
+                return Promise.all(results[0].proyectos.map(function (project) {
                     var mapped = mapProject(project);
                     mapped.docs = docs.filter(function (doc) { return doc.proyecto_id === project.id; }).map(function (doc) {
                         return { id: doc.id, name: doc.titulo, author: doc.creador, when: formatDate(doc.fecha_actualizacion.slice(0, 10)), body: doc.contenido, feedback: doc.retroalimentacion, grade: doc.calificacion };
                     });
-                    return mapped;
-                });
+                    return Promise.all(mapped.tasks.map(function (task) {
+                        return Promise.all([
+                            requestJson('/tareas/api/' + task.id + '/entregas/'),
+                            requestJson('/tareas/api/' + task.id + '/evaluaciones/')
+                        ]).then(function (data) {
+                            task.deliveries = data[0].entregas;
+                            task.groupEvaluation = data[1].grupal;
+                            task.individualEvaluations = data[1].individuales;
+                        });
+                    })).then(function () { return mapped; });
+                })).then(function (loadedProjects) {
+                    projects = loadedProjects;
                 var projectSelect = $('fileProjectSelect');
                 if (projectSelect) {
                     projectSelect.replaceChildren(new Option('Archivo personal de cátedra', ''));
@@ -1642,6 +1659,7 @@ nav {
                 renderWelcome();
                 renderProjectGrid();
                 renderGeneralDocuments(docs);
+                });
             })
             .catch(function (error) { toast(error.message); });
     }
@@ -1826,7 +1844,19 @@ nav {
         }
         project.devoluciones.forEach(function (entry) {
             var item = el('article', 'project-feedback-entry');
+            var evaluationLabel = entry.tipo === 'grupal' ? 'Evaluación grupal'
+                : entry.tipo === 'individual' ? 'Evaluación individual · ' + entry.alumno
+                    : 'Registro histórico';
+            if (entry.tipo !== 'historica') {
+                evaluationLabel += entry.anulada ? ' · ANULADA' : ' · VIGENTE';
+            }
+            item.appendChild(el('strong', null, evaluationLabel));
             item.appendChild(el('strong', null, entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+            if (entry.anulada) {
+                var cancellation = 'Anulada ' + (entry.anulada_en ? formatDate(entry.anulada_en.slice(0, 10)) : '');
+                if (entry.anulada_por) cancellation += ' por ' + entry.anulada_por;
+                item.appendChild(el('p', 'muted', cancellation));
+            }
             if (entry.tarea || entry.documento) item.appendChild(el('p', 'muted', 'Sobre ' + (entry.tarea || entry.documento)));
             if (entry.comentario) item.appendChild(el('p', null, entry.comentario));
             if (entry.calificacion) item.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
@@ -1888,19 +1918,44 @@ nav {
                 if (t.desc) card.appendChild(el('p', null, t.desc));
                 card.appendChild(el('p', 'task-priority-label', 'Prioridad: ' + (t.priority || 'media')));
 
+                var deliveryBox = el('div', 'project-task-deliveries');
+                deliveryBox.appendChild(el('strong', null, 'Entrega grupal'));
+                deliveryBox.appendChild(el('p', 'muted', 'Integrantes: ' + (p.members.join(', ') || 'Sin integrantes')));
+                if (!t.deliveries.length) {
+                    deliveryBox.appendChild(el('p', 'muted', 'El grupo todavía no entregó.'));
+                } else {
+                    t.deliveries.forEach(function (delivery) {
+                        deliveryBox.appendChild(el('p', 'muted', 'Entrega #' + delivery.id + ' · ' + delivery.alumno + ' · ' + formatDate(delivery.fecha_entrega.slice(0, 10)) + ' · ' + delivery.estado));
+                        var download = el('a', 'text-button', 'Descargar ' + delivery.nombre);
+                        download.href = delivery.descarga;
+                        deliveryBox.appendChild(download);
+                        if (/\.(pdf|png|jpe?g)$/i.test(delivery.nombre)) {
+                            var preview = el('a', 'text-button', 'Abrir en el navegador');
+                            preview.href = delivery.descarga + '?inline=1';
+                            preview.target = '_blank';
+                            preview.rel = 'noopener noreferrer';
+                            deliveryBox.appendChild(preview);
+                        }
+                    });
+                }
+                card.appendChild(deliveryBox);
+
                 var footer = el('div', 'card-footer');
                 var dateText = col.key === 'done' ? '✓ Finalizado' : (t.date ? '📅 ' + formatDate(t.date) : 'Sin fecha');
                 var date = el('span', 'card-date' + (col.key !== 'done' && isOverdue(t.date) ? ' overdue' : ''), dateText);
                 footer.appendChild(date);
 
-                var review = el('button', 'text-button', t.grade ? 'Ver / editar evaluación' : 'Calificar y retroalimentar');
+                var review = el('button', 'text-button', t.groupEvaluation ? 'Ver / editar evaluación grupal e individual' : 'Evaluar grupo e integrantes');
                 review.type = 'button';
                 review.dataset.gradeTaskId = t.id;
                 footer.appendChild(review);
 
                 card.appendChild(footer);
-                if (t.grade) card.appendChild(el('p', 'task-grade', 'Calificación: ' + t.grade));
-                if (t.feedback) card.appendChild(el('p', 'task-feedback', 'Retroalimentación: ' + t.feedback));
+                if (t.groupEvaluation) {
+                    card.appendChild(el('p', 'task-grade', 'Evaluación grupal: ' + (t.groupEvaluation.calificacion || 'Sin nota')));
+                    if (t.groupEvaluation.comentario) card.appendChild(el('p', 'task-feedback', t.groupEvaluation.comentario));
+                }
+                if (t.grade) card.appendChild(el('p', 'muted', 'Calificación histórica de tarea: ' + t.grade));
                 column.appendChild(card);
             });
 
@@ -1920,6 +1975,84 @@ nav {
         $('taskTitle').focus();
     }
 
+    function refreshEvaluationProject(message) {
+        var projectId = state.projectId;
+        return loadProjects().then(function () {
+            if (projectId) openProject(projectId);
+            if (message) toast(message);
+        });
+    }
+
+    function renderIndividualEvaluations(task) {
+        var list = $('individualEvaluationList');
+        list.replaceChildren();
+        var project = currentProject();
+        project.memberRecords.forEach(function (member) {
+            var current = task.individualEvaluations.filter(function (entry) {
+                return entry.alumno_id === member.id;
+            })[0];
+            var card = el('section', 'individual-evaluation-card');
+            card.appendChild(el('h4', null, member.nombre));
+            var gradeLabel = el('label', null, 'Nota individual');
+            var grade = document.createElement('input');
+            grade.type = 'number';
+            grade.min = '0';
+            grade.max = document.body.dataset.gradeMax;
+            grade.step = '0.01';
+            grade.value = current ? current.calificacion : '';
+            gradeLabel.appendChild(grade);
+            card.appendChild(gradeLabel);
+            var commentLabel = el('label', null, 'Devolución individual');
+            var comment = document.createElement('textarea');
+            comment.rows = 3;
+            comment.maxLength = 20000;
+            comment.value = current ? current.comentario : '';
+            commentLabel.appendChild(comment);
+            card.appendChild(commentLabel);
+            var actions = el('div', 'modal-actions');
+            var save = el('button', 'text-button', current ? 'Corregir evaluación individual' : 'Guardar evaluación individual');
+            save.type = 'button';
+            save.addEventListener('click', function () {
+                if (save.disabled) return;
+                var originalLabel = save.textContent;
+                save.disabled = true;
+                save.textContent = 'Guardando...';
+                var payload = { calificacion: grade.value, comentario: comment.value.trim() };
+                requestJson('/tareas/api/' + task.id + '/evaluaciones/individual/' + member.id + '/', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+                    body: JSON.stringify(payload)
+                }).then(function () {
+                    $('evaluationModal').close();
+                    return refreshEvaluationProject('Evaluación individual guardada.');
+                }).catch(function (error) {
+                    $('evaluationError').textContent = error.message || 'No se pudo guardar la evaluación.';
+                }).finally(function () {
+                    save.disabled = false;
+                    save.textContent = originalLabel;
+                });
+            });
+            actions.appendChild(save);
+            if (current) {
+                var remove = el('button', 'danger-button', 'Eliminar evaluación individual');
+                remove.type = 'button';
+                remove.addEventListener('click', function () {
+                    if (!window.confirm('¿Eliminar la evaluación individual de ' + member.nombre + '? La acción se conservará en el historial.')) return;
+                    requestJson('/tareas/api/' + task.id + '/evaluaciones/individual/' + member.id + '/', {
+                        method: 'DELETE',
+                        headers: { 'X-CSRFToken': csrfToken() }
+                    }).then(function () {
+                        $('evaluationModal').close();
+                        return refreshEvaluationProject('Evaluación individual eliminada.');
+                    }).catch(function (error) { $('evaluationError').textContent = error.message; });
+                });
+                actions.appendChild(remove);
+            }
+            card.appendChild(actions);
+            list.appendChild(card);
+        });
+    }
+
     function initKanban() {
         $('kanbanBoard').addEventListener('click', function (event) {
             var button = event.target.closest('[data-grade-task-id]');
@@ -1930,41 +2063,50 @@ nav {
             if (!task) return;
             evaluationTask = task;
             $('evaluationTaskTitle').textContent = task.title;
-            $('evaluationGrade').value = task.grade || '';
-            $('evaluationFeedback').value = task.feedback || '';
+            $('evaluationGrade').value = task.groupEvaluation ? task.groupEvaluation.calificacion : '';
+            $('evaluationFeedback').value = task.groupEvaluation ? task.groupEvaluation.comentario : '';
             $('evaluationError').textContent = '';
+            $('deleteGroupEvaluationBtn').hidden = !task.groupEvaluation;
+            renderIndividualEvaluations(task);
             $('evaluationModal').showModal();
         });
 
         $('evaluationForm').addEventListener('submit', function (event) {
             event.preventDefault();
             if (!evaluationTask) return;
+            var save = $('evaluationForm').querySelector('[type="submit"]');
+            if (save.disabled) return;
+            var originalLabel = save.textContent;
+            save.disabled = true;
+            save.textContent = 'Guardando...';
             var payload = {
                 calificacion: $('evaluationGrade').value,
-                retroalimentacion: $('evaluationFeedback').value.trim()
+                comentario: $('evaluationFeedback').value.trim()
             };
-            fetch('/tareas/api/' + evaluationTask.id + '/evaluacion/', {
-                method: 'PATCH',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Accept': 'application/json',
-                    'X-CSRFToken': csrfToken()
-                },
+            requestJson('/tareas/api/' + evaluationTask.id + '/evaluaciones/grupal/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
                 body: JSON.stringify(payload)
-            }).then(function (response) {
-                return response.json().then(function (data) {
-                    if (!response.ok) throw new Error(data.error || 'No se pudo guardar la evaluación.');
-                    return data;
-                });
             }).then(function () {
-                var projectId = state.projectId;
                 $('evaluationModal').close();
-                return loadProjects().then(function () { openProject(projectId); });
-            }).then(function () {
-                toast('Evaluación guardada.');
+                return refreshEvaluationProject('Evaluación grupal guardada.');
             }).catch(function (error) {
-                $('evaluationError').textContent = error.message;
+                $('evaluationError').textContent = error.message || 'No se pudo guardar la evaluación.';
+            }).finally(function () {
+                save.disabled = false;
+                save.textContent = originalLabel;
             });
+        });
+
+        $('deleteGroupEvaluationBtn').addEventListener('click', function () {
+            if (!evaluationTask || !window.confirm('¿Eliminar la evaluación grupal? El historial se conservará.')) return;
+            requestJson('/tareas/api/' + evaluationTask.id + '/evaluaciones/grupal/', {
+                method: 'DELETE',
+                headers: { 'X-CSRFToken': csrfToken() }
+            }).then(function () {
+                $('evaluationModal').close();
+                return refreshEvaluationProject('Evaluación grupal eliminada.');
+            }).catch(function (error) { $('evaluationError').textContent = error.message; });
         });
     }
     /* ---------- Documentos y retroalimentación ---------- */

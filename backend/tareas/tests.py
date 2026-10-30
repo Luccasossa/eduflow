@@ -1,9 +1,12 @@
 import json
 import tempfile
+from concurrent.futures import ThreadPoolExecutor
+from threading import Barrier
 
 from django.contrib.auth import get_user_model
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase, override_settings
+from django.db import close_old_connections
+from django.test import Client, TestCase, TransactionTestCase, override_settings, skipUnlessDBFeature
 from django.urls import reverse
 
 from proyectos.models import Proyecto
@@ -33,7 +36,10 @@ class TablerosTests(TestCase):
         self._settings = override_settings(PRIVATE_MEDIA_ROOT=self._media.name)
         self._settings.enable()
         self.addCleanup(self._settings.disable)
-        Entrega._meta.get_field("archivo").storage.location = self._media.name
+        storage = Entrega._meta.get_field("archivo").storage
+        previous_location = storage.location
+        storage.location = self._media.name
+        self.addCleanup(setattr, storage, "location", previous_location)
         self.alumno = self.crear_usuario("40100001")
         self.companero = self.crear_usuario("40100002")
         self.ajeno = self.crear_usuario("40100003")
@@ -228,7 +234,7 @@ class TablerosTests(TestCase):
         self.assertEqual(entrega.alumno, self.companero)
         self.assertEqual(self.client.get(url).json()["entregas"][0]["id"], entrega.pk)
         self.client.force_login(self.alumno)
-        self.assertEqual(self.client.get(url).json()["entregas"], [])
+        self.assertEqual(self.client.get(url).json()["entregas"][0]["id"], entrega.pk)
         self.client.force_login(self.profesor)
         self.assertEqual(self.client.get(url).status_code, 404)
         proyecto.profesores.add(self.profesor)
@@ -297,3 +303,274 @@ class TablerosTests(TestCase):
         self.assertEqual(self.client.delete(reverse("api_tarea", args=[tarea.pk])).status_code, 200)
         proyecto.refresh_from_db()
         self.assertEqual(proyecto.progreso, 0)
+
+    def test_entrega_grupal_es_compartida_sin_duplicar_por_integrante(self):
+        proyecto = self.crear_proyecto()
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe grupal")
+        url = reverse("api_entregas", args=[tarea.pk])
+        self.client.force_login(self.companero)
+        response = self.client.post(url, {"archivo": SimpleUploadedFile("grupo.pdf", b"%PDF-1.7 entrega")})
+        self.assertEqual(response.status_code, 201, response.content)
+        entrega = Entrega.objects.get()
+        self.assertEqual(entrega.alumno, self.companero)
+        self.assertEqual(response.json()["entrega"]["grupo_id"], proyecto.pk)
+        self.client.force_login(self.alumno)
+        shared = self.client.get(url).json()["entregas"]
+        self.assertEqual(len(shared), 1)
+        self.assertEqual(shared[0]["id"], entrega.pk)
+        shared_download = self.client.get(reverse("descargar_entrega", args=[entrega.pk]))
+        self.assertEqual(shared_download.status_code, 200)
+        shared_download.close()
+        duplicate = self.client.post(url, {"archivo": SimpleUploadedFile("otra.pdf", b"%PDF-1.7 otra")})
+        self.assertEqual(duplicate.status_code, 409)
+        self.assertEqual(Entrega.objects.filter(tarea=tarea).count(), 1)
+
+    def test_entregas_grupales_historicas_se_listan_individualmente(self):
+        proyecto = self.crear_proyecto()
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe grupal")
+        first = Entrega.objects.create(
+            tarea=tarea,
+            alumno=self.alumno,
+            archivo=SimpleUploadedFile("entrega-a.pdf", b"%PDF-1.7 primera"),
+        )
+        second = Entrega.objects.create(
+            tarea=tarea,
+            alumno=self.companero,
+            archivo=SimpleUploadedFile("entrega-b.pdf", b"%PDF-1.7 segunda"),
+        )
+        self.client.force_login(self.alumno)
+        response = self.client.get(reverse("api_entregas", args=[tarea.pk]))
+        self.assertEqual(response.status_code, 200)
+        rows = response.json()["entregas"]
+        self.assertEqual({row["id"] for row in rows}, {first.pk, second.pk})
+        self.assertEqual({row["alumno_id"] for row in rows}, {self.alumno.pk, self.companero.pk})
+        self.assertEqual(len({row["nombre"] for row in rows}), 2)
+        self.assertTrue(all(row["nombre"].endswith(".pdf") for row in rows))
+        self.assertTrue(all(row["fecha_entrega"] for row in rows))
+
+    def test_entrega_grupal_es_visible_y_descargable_por_docente_autorizado(self):
+        proyecto = self.crear_proyecto()
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe grupal")
+        self.client.force_login(self.companero)
+        response = self.client.post(
+            reverse("api_entregas", args=[tarea.pk]),
+            {"archivo": SimpleUploadedFile("grupo.pdf", b"%PDF-1.7 entrega")},
+        )
+        entrega = Entrega.objects.get(pk=response.json()["entrega"]["id"])
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(reverse("api_entregas", args=[tarea.pk])).status_code, 404)
+        self.assertEqual(self.client.get(reverse("descargar_entrega", args=[entrega.pk])).status_code, 404)
+        proyecto.profesores.add(self.profesor)
+        listed = self.client.get(reverse("api_entregas", args=[tarea.pk]))
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json()["entregas"][0]["alumno_id"], self.companero.pk)
+        download = self.client.get(reverse("descargar_entrega", args=[entrega.pk]))
+        self.assertEqual(download.status_code, 200)
+        self.assertIn("attachment", download["Content-Disposition"])
+        download.close()
+        preview = self.client.get(reverse("descargar_entrega", args=[entrega.pk]) + "?inline=1")
+        self.assertEqual(preview.status_code, 200)
+        self.assertIn("inline", preview["Content-Disposition"])
+        self.assertEqual(preview["Content-Type"], "application/pdf")
+        self.assertEqual(preview["Content-Security-Policy"], "sandbox")
+        preview.close()
+
+    def test_evaluaciones_grupales_e_individuales_se_aislan_por_alumno(self):
+        from proyectos.models import DevolucionDocente
+
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe")
+        group_url = reverse("api_evaluacion_grupal", args=[tarea.pk])
+        first_url = reverse("api_evaluacion_individual", args=[tarea.pk, self.alumno.pk])
+        second_url = reverse("api_evaluacion_individual", args=[tarea.pk, self.companero.pk])
+        self.client.force_login(self.profesor)
+        group = self.client.post(group_url, data=json.dumps({"calificacion": "8.50", "comentario": "Buen trabajo grupal."}), content_type="application/json")
+        self.assertEqual(group.status_code, 201, group.content)
+        invalid_revision = self.client.post(group_url, data=json.dumps({"calificacion": "10.01"}), content_type="application/json")
+        self.assertEqual(invalid_revision.status_code, 400)
+        self.assertEqual(self.client.get(reverse("api_evaluaciones", args=[tarea.pk])).json()["grupal"]["calificacion"], "8.50")
+        first = self.client.post(first_url, data=json.dumps({"calificacion": "9.00", "comentario": "Aporte destacado."}), content_type="application/json")
+        second = self.client.post(second_url, data=json.dumps({"calificacion": "7.50", "comentario": "Aporte suficiente."}), content_type="application/json")
+        self.assertEqual(first.status_code, 201, first.content)
+        self.assertEqual(second.status_code, 201, second.content)
+        self.assertNotEqual(first.json()["evaluacion"]["calificacion"], second.json()["evaluacion"]["calificacion"])
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, tipo="historica").count(), 0)
+
+        self.client.force_login(self.alumno)
+        visible = self.client.get(reverse("api_evaluaciones", args=[tarea.pk])).json()
+        self.assertEqual(visible["grupal"]["calificacion"], "8.50")
+        self.assertEqual([item["alumno_id"] for item in visible["individuales"]], [self.alumno.pk])
+        project_view = self.client.get(reverse("api_proyecto", args=[proyecto.pk])).json()["proyecto"]["devoluciones"]
+        individual_ids = [entry["alumno_id"] for entry in project_view if entry["tipo"] == "individual"]
+        self.assertEqual(individual_ids, [self.alumno.pk])
+
+        self.client.force_login(self.companero)
+        visible = self.client.get(reverse("api_evaluaciones", args=[tarea.pk])).json()
+        self.assertEqual([item["alumno_id"] for item in visible["individuales"]], [self.companero.pk])
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.get(reverse("api_evaluaciones", args=[tarea.pk])).status_code, 404)
+
+    def test_solo_docente_autorizado_puede_guardar_o_eliminar_evaluaciones(self):
+        proyecto = self.crear_proyecto()
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe")
+        group_url = reverse("api_evaluacion_grupal", args=[tarea.pk])
+        individual_url = reverse("api_evaluacion_individual", args=[tarea.pk, self.alumno.pk])
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.post(group_url, data="{}", content_type="application/json").status_code, 403)
+        self.client.force_login(self.alumno)
+        self.assertEqual(self.client.post(group_url, data="{}", content_type="application/json").status_code, 403)
+        self.assertEqual(self.client.delete(individual_url).status_code, 403)
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.post(individual_url, data=json.dumps({"calificacion": 8}), content_type="application/json").status_code, 404)
+
+    def test_eliminar_y_recrear_evaluaciones_preserva_historial_y_entrega(self):
+        from proyectos.models import DevolucionDocente
+
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe")
+        self.client.force_login(self.companero)
+        posted = self.client.post(
+            reverse("api_entregas", args=[tarea.pk]),
+            {"archivo": SimpleUploadedFile("grupo.pdf", b"%PDF-1.7 entrega")},
+        )
+        entrega = Entrega.objects.get(pk=posted.json()["entrega"]["id"])
+        storage = entrega.archivo.storage
+        storage_name = entrega.archivo.name
+
+        self.client.force_login(self.profesor)
+        group_url = reverse("api_evaluacion_grupal", args=[tarea.pk])
+        first_url = reverse("api_evaluacion_individual", args=[tarea.pk, self.alumno.pk])
+        second_url = reverse("api_evaluacion_individual", args=[tarea.pk, self.companero.pk])
+        self.client.post(group_url, data=json.dumps({"calificacion": 8}), content_type="application/json")
+        self.client.post(first_url, data=json.dumps({"calificacion": 9}), content_type="application/json")
+        self.client.post(second_url, data=json.dumps({"calificacion": 7}), content_type="application/json")
+        self.assertEqual(self.client.delete(group_url).status_code, 200)
+        self.assertEqual(self.client.delete(first_url).status_code, 200)
+        current = self.client.get(reverse("api_evaluaciones", args=[tarea.pk])).json()
+        self.assertIsNone(current["grupal"])
+        self.assertEqual([item["alumno_id"] for item in current["individuales"]], [self.companero.pk])
+        self.assertTrue(Entrega.objects.filter(pk=entrega.pk).exists())
+        self.assertTrue(storage.exists(storage_name))
+        history = self.client.get(reverse("api_proyecto", args=[proyecto.pk])).json()["proyecto"]["devoluciones"]
+        annulled = [entry for entry in history if entry["anulada"]]
+        self.assertEqual(len(annulled), 2)
+        self.assertTrue(all(entry["anulada_en"] and entry["anulada_por"] for entry in annulled))
+
+        self.assertEqual(self.client.post(group_url, data=json.dumps({"calificacion": 8.5}), content_type="application/json").status_code, 201)
+        self.assertEqual(self.client.post(first_url, data=json.dumps({"calificacion": 9.5}), content_type="application/json").status_code, 201)
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, tipo="grupal").count(), 2)
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, tipo="individual", alumno=self.alumno).count(), 2)
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, anulada_en__isnull=False).count(), 2)
+
+    def test_repetir_evaluacion_no_crea_version_duplicada_y_corregir_conserva_historial(self):
+        from proyectos.models import DevolucionDocente
+
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe")
+        url = reverse("api_evaluacion_grupal", args=[tarea.pk])
+        payload = json.dumps({"calificacion": "8.25", "comentario": "Buen trabajo."})
+        self.client.force_login(self.profesor)
+
+        created = self.client.post(url, data=payload, content_type="application/json")
+        repeated = self.client.post(url, data=payload, content_type="application/json")
+        self.assertEqual(created.status_code, 201)
+        self.assertEqual(repeated.status_code, 200)
+        self.assertTrue(repeated.json()["sin_cambios"])
+        self.assertEqual(created.json()["evaluacion"]["id"], repeated.json()["evaluacion"]["id"])
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, tipo="grupal").count(), 1)
+
+        corrected = self.client.post(
+            url,
+            data=json.dumps({"calificacion": "9.00", "comentario": "Trabajo corregido."}),
+            content_type="application/json",
+        )
+        self.assertEqual(corrected.status_code, 201)
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, tipo="grupal").count(), 2)
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, tipo="grupal", anulada_en__isnull=True).count(), 1)
+        previous = DevolucionDocente.objects.get(pk=created.json()["evaluacion"]["id"])
+        self.assertIsNotNone(previous.anulada_en)
+        self.assertEqual(previous.anulada_por, self.profesor)
+
+        individual_url = reverse("api_evaluacion_individual", args=[tarea.pk, self.alumno.pk])
+        individual_payload = json.dumps({"calificacion": "7.50", "comentario": "Aporte individual."})
+        first_individual = self.client.post(individual_url, data=individual_payload, content_type="application/json")
+        repeated_individual = self.client.post(individual_url, data=individual_payload, content_type="application/json")
+        self.assertEqual(first_individual.status_code, 201)
+        self.assertEqual(repeated_individual.status_code, 200)
+        self.assertEqual(first_individual.json()["evaluacion"]["id"], repeated_individual.json()["evaluacion"]["id"])
+        self.assertEqual(
+            DevolucionDocente.objects.filter(tarea=tarea, tipo="individual", alumno=self.alumno, anulada_en__isnull=True).count(),
+            1,
+        )
+
+
+    def test_evaluaciones_rechazan_notas_invalidas_y_post_sin_csrf(self):
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe")
+        url = reverse("api_evaluacion_grupal", args=[tarea.pk])
+        self.client.force_login(self.profesor)
+        for grade in ("10.01", "8.555", "NaN", "texto"):
+            response = self.client.post(url, data=json.dumps({"calificacion": grade}), content_type="application/json")
+            self.assertEqual(response.status_code, 400, grade)
+        csrf_client = Client(enforce_csrf_checks=True)
+        csrf_client.force_login(self.profesor)
+        response = csrf_client.post(url, data=json.dumps({"calificacion": 8}), content_type="application/json")
+        self.assertEqual(response.status_code, 403)
+
+
+class EntregaConcurrenteTests(TransactionTestCase):
+    reset_sequences = True
+
+    def setUp(self):
+        self._media = tempfile.TemporaryDirectory()
+        self.addCleanup(self._media.cleanup)
+        self._settings = override_settings(PRIVATE_MEDIA_ROOT=self._media.name)
+        self._settings.enable()
+        self.addCleanup(self._settings.disable)
+        storage = Entrega._meta.get_field("archivo").storage
+        previous_location = storage.location
+        storage.location = self._media.name
+        self.addCleanup(setattr, storage, "location", previous_location)
+        self.alumno = Usuario.objects.create_user(
+            dni="40200001", password="ClaveSegura_2026!", email="concurrente-a@example.test",
+        )
+        PerfilUsuario.objects.create(usuario=self.alumno, rol="alumno")
+        self.companero = Usuario.objects.create_user(
+            dni="40200002", password="ClaveSegura_2026!", email="concurrente-b@example.test",
+        )
+        PerfilUsuario.objects.create(usuario=self.companero, rol="alumno")
+        self.proyecto = Proyecto.objects.create(nombre="Concurrente", creador=self.alumno)
+        self.proyecto.integrantes.add(self.alumno, self.companero)
+        self.tarea = Tarea.objects.create(creador=self.alumno, proyecto=self.proyecto, titulo="Entrega")
+
+    @skipUnlessDBFeature("has_select_for_update")
+    def test_dos_entregas_simultaneas_crean_una_sola_entrega_grupal(self):
+        url = reverse("api_entregas", args=[self.tarea.pk])
+        barrier = Barrier(2)
+
+        def submit(user, filename):
+            close_old_connections()
+            try:
+                client = Client()
+                client.force_login(user)
+                barrier.wait(timeout=10)
+                response = client.post(
+                    url,
+                    {"archivo": SimpleUploadedFile(filename, b"%PDF-1.7 concurrente")},
+                )
+                return response.status_code
+            finally:
+                close_old_connections()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(
+                lambda values: submit(*values),
+                ((self.alumno, "a.pdf"), (self.companero, "b.pdf")),
+            ))
+
+        self.assertCountEqual(results, [201, 409])
+        self.assertEqual(Entrega.objects.filter(tarea=self.tarea).count(), 1)
