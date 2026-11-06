@@ -74,6 +74,10 @@ class DevolucionDocente(models.Model):
         blank=True,
         related_name="devoluciones_anuladas",
     )
+    reemplaza = models.ForeignKey(
+        "self", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="versiones_siguientes",
+    )
 
     class Meta:
         ordering = ("-fecha_creacion", "-pk")

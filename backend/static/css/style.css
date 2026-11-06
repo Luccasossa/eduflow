@@ -829,6 +829,17 @@ nav {
     animation: modalAppear 0.25s ease;
 }
 
+.detail-modal {
+    width: min(760px, calc(100vw - 32px));
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
+#teacherTaskDetailModal {
+    max-height: 85vh;
+    overflow-y: auto;
+}
+
 .modal h2 {
     margin-bottom: 8px;
 }

@@ -10,6 +10,7 @@ from django.core.exceptions import ValidationError
 from django.conf import settings
 from django.http import Http404, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
+from django.utils import timezone
 from django.views.decorators.http import require_GET, require_http_methods
 
 from usuarios.models import Usuario
@@ -83,20 +84,27 @@ def _serializar_proyecto(proyecto, usuario=None):
                 "titulo": tarea.titulo,
                 "descripcion": tarea.descripcion,
                 "fecha_vencimiento": tarea.fecha_vencimiento.isoformat() if tarea.fecha_vencimiento else "",
+                "fecha_creacion": tarea.fecha_creacion.isoformat(),
                 "prioridad": tarea.prioridad,
                 "estado": tarea.estado,
                 "creador": tarea.creador.get_full_name() or tarea.creador.dni,
                 "calificacion": str(tarea.calificacion) if tarea.calificacion is not None else "",
                 "retroalimentacion": tarea.retroalimentacion,
                 "archivos_adjuntos": [
-                    {"id": f.pk, "nombre": f.nombre_original, "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
+                    {"id": f.pk, "nombre": f.nombre_original, "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
                     for f in tarea.archivos_adjuntos.all()
+                ],
+                "devoluciones": [
+                    _serializar_devolucion(entry, usuario)
+                    for entry in tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
+                    if not (usuario and _rol(usuario) == "alumno")
+                    or (entry.anulada_en is None and (entry.tipo == "historica" or entry.tipo == "grupal" or (entry.tipo == "individual" and entry.alumno_id == usuario.pk)))
                 ],
             }
             for tarea in tareas
         ],
         "devoluciones": [
-            _serializar_devolucion(d)
+            _serializar_devolucion(d, usuario)
             for d in _devoluciones_visibles(proyecto, usuario)
         ],
         "archivos_adjuntos": [
@@ -112,14 +120,14 @@ def _devoluciones_visibles(proyecto, usuario):
     ).all()
     if usuario and _rol(usuario) == "alumno":
         entries = entries.filter(
-            Q(tipo="historica")
+            Q(tipo="historica", tarea__isnull=True, anulada_en__isnull=True)
             | Q(tipo="grupal", anulada_en__isnull=True)
             | Q(tipo="individual", alumno=usuario, anulada_en__isnull=True)
         )
     return entries
 
 
-def _serializar_devolucion(d):
+def _serializar_devolucion(d, usuario=None):
     return {
         "id": d.id,
         "comentario": d.comentario,
@@ -136,6 +144,8 @@ def _serializar_devolucion(d):
         "anulada": d.anulada_en is not None,
         "anulada_en": d.anulada_en.isoformat() if d.anulada_en else "",
         "anulada_por": (d.anulada_por.get_full_name() or d.anulada_por.dni) if d.anulada_por_id else "",
+        "reemplaza_id": d.reemplaza_id,
+        "puede_editar": bool(usuario and _rol(usuario) == "profesor" and d.autor_id == usuario.pk and d.anulada_en is None),
     }
 
 
@@ -253,7 +263,7 @@ def api_devoluciones(request, pk):
         if not (profesor_autorizado(request.user, proyecto) or alumno_integrante(request.user, proyecto)):
             raise Http404
         entries = _devoluciones_visibles(proyecto, request.user)
-        return JsonResponse({"devoluciones": [_serializar_devolucion(d) for d in entries]})
+        return JsonResponse({"devoluciones": [_serializar_devolucion(d, request.user) for d in entries]})
     if not profesor_autorizado(request.user, proyecto):
         return JsonResponse({"error": "No tienes autorización para evaluar este proyecto."}, status=403)
     data = _json_body(request)
@@ -285,7 +295,62 @@ def api_devoluciones(request, pk):
             entry.save()
     except (ValueError, TypeError, InvalidOperation, ValidationError):
         return JsonResponse({"error": f"La calificación debe estar entre 0 y {getattr(settings, 'EDUFLOW_GRADE_MAX', 10)} y la devolución debe incluir comentario o nota."}, status=400)
-    return JsonResponse({"devolucion": _serializar_devolucion(entry)}, status=201)
+    return JsonResponse({"devolucion": _serializar_devolucion(entry, request.user)}, status=201)
+
+
+@login_required
+@require_http_methods(["PATCH", "DELETE"])
+def api_devolucion(request, pk):
+    entry = get_object_or_404(DevolucionDocente.objects.select_related("proyecto", "tarea", "documento", "alumno"), pk=pk)
+    if not profesor_autorizado(request.user, entry.proyecto):
+        raise Http404
+    if entry.autor_id != request.user.pk:
+        return JsonResponse({"error": "Solo quien publicó la devolución puede modificarla."}, status=403)
+    if entry.anulada_en is not None:
+        return JsonResponse({"error": "La devolución ya no está vigente."}, status=409)
+    if request.method == "DELETE":
+        entry.anulada_en = timezone.now()
+        entry.anulada_por = request.user
+        entry.save(update_fields=("anulada_en", "anulada_por"))
+        if entry.tarea_id:
+            latest = entry.tarea.devoluciones.filter(anulada_en__isnull=True).order_by("-fecha_creacion", "-pk").first()
+            entry.tarea.calificacion = latest.calificacion if latest else None
+            entry.tarea.retroalimentacion = latest.comentario if latest else ""
+            entry.tarea.evaluado_por = latest.autor if latest else None
+            entry.tarea.save(update_fields=("calificacion", "retroalimentacion", "evaluado_por"))
+        return JsonResponse({"eliminada": True})
+
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON válido."}, status=400)
+    try:
+        raw_grade = data.get("calificacion", "")
+        grade = None if raw_grade in (None, "") else forms.DecimalField(
+            max_digits=5, decimal_places=2, min_value=0, max_value=settings.EDUFLOW_GRADE_MAX,
+        ).clean(raw_grade)
+        comment = data.get("comentario", "")
+        if not isinstance(comment, str) or len(comment) > 20000:
+            raise ValueError
+        replacement = DevolucionDocente(
+            proyecto=entry.proyecto, tarea=entry.tarea, documento=entry.documento,
+            autor=request.user, tipo=entry.tipo, alumno=entry.alumno,
+            calificacion=grade, comentario=comment.strip(), reemplaza=entry,
+        )
+        replacement.full_clean()
+    except (ValidationError, ValueError, TypeError):
+        return JsonResponse({"error": "La calificación debe estar entre 0 y 10 y debes incluir comentario o nota."}, status=400)
+
+    with transaction.atomic():
+        entry.anulada_en = timezone.now()
+        entry.anulada_por = request.user
+        entry.save(update_fields=("anulada_en", "anulada_por"))
+        replacement.save()
+        if replacement.tarea_id:
+            replacement.tarea.calificacion = replacement.calificacion
+            replacement.tarea.retroalimentacion = replacement.comentario
+            replacement.tarea.evaluado_por = request.user
+            replacement.tarea.save(update_fields=("calificacion", "retroalimentacion", "evaluado_por"))
+    return JsonResponse({"devolucion": _serializar_devolucion(replacement, request.user)}, status=201)
 
 
 @login_required

@@ -2,6 +2,7 @@ import json
 import mimetypes
 from datetime import date
 from django.db import IntegrityError, OperationalError, transaction
+from django.db.models import Q
 from django.contrib.auth.decorators import login_required
 from django import forms
 from django.core.exceptions import ValidationError
@@ -64,6 +65,11 @@ def _fecha(value):
 
 def _serializar(tarea, usuario=None):
     sincronizar_prioridades((tarea,))
+    devoluciones = tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
+    if usuario and _rol(usuario) == "alumno":
+        devoluciones = devoluciones.filter(anulada_en__isnull=True).filter(
+            Q(tipo="historica", tarea=tarea) | Q(tipo="grupal") | Q(tipo="individual", alumno=usuario)
+        )
     return {
         "id": tarea.id,
         "titulo": tarea.titulo,
@@ -78,6 +84,8 @@ def _serializar(tarea, usuario=None):
             {"id": f.pk, "nombre": f.nombre_original, "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
             for f in tarea.archivos_adjuntos.all()
         ],
+        "fecha_creacion": tarea.fecha_creacion.isoformat(),
+        "devoluciones": [_serializar_evaluacion(entry, usuario) for entry in devoluciones],
     }
 
 
@@ -321,7 +329,7 @@ def _serializar_entrega(entrega):
     }
 
 
-def _serializar_evaluacion(evaluacion):
+def _serializar_evaluacion(evaluacion, usuario=None):
     return {
         "id": evaluacion.pk,
         "tipo": evaluacion.tipo,
@@ -333,6 +341,8 @@ def _serializar_evaluacion(evaluacion):
         "comentario": evaluacion.comentario,
         "autor": evaluacion.autor.get_full_name() or evaluacion.autor.dni,
         "fecha": evaluacion.fecha_creacion.isoformat(),
+        "anulada": evaluacion.anulada_en is not None,
+        "puede_editar": bool(usuario and _rol(usuario) == "profesor" and evaluacion.autor_id == usuario.pk and evaluacion.anulada_en is None),
     }
 
 
@@ -355,8 +365,15 @@ def api_evaluaciones(request, pk):
     if _rol(request.user) == "alumno":
         individuales = individuales.filter(alumno=request.user)
     return JsonResponse({
-        "grupal": _serializar_evaluacion(grupal) if grupal else None,
-        "individuales": [_serializar_evaluacion(item) for item in individuales],
+        "grupal": _serializar_evaluacion(grupal, request.user) if grupal else None,
+        "individuales": [_serializar_evaluacion(item, request.user) for item in individuales],
+        "historial": [
+            _serializar_evaluacion(item, request.user)
+            for item in tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
+            if _rol(request.user) != "alumno" or (
+                item.anulada_en is None and (item.tipo == "grupal" or (item.tipo == "individual" and item.alumno_id == request.user.pk))
+            )
+        ],
     })
 
 
@@ -424,9 +441,12 @@ def _guardar_o_anular_evaluacion(request, pk, tipo, alumno_id=None):
             actuales = actuales.filter(alumno__isnull=True)
 
         if request.method == "DELETE":
-            if not actuales.exists():
+            actual = actuales.order_by("-fecha_creacion", "-pk").first()
+            if not actual:
                 raise Http404
-            actuales.update(anulada_en=timezone.now(), anulada_por=request.user)
+            actual.anulada_en = timezone.now()
+            actual.anulada_por = request.user
+            actual.save(update_fields=("anulada_en", "anulada_por"))
             return JsonResponse({"eliminada": True})
 
         evaluacion = DevolucionDocente(
@@ -443,16 +463,18 @@ def _guardar_o_anular_evaluacion(request, pk, tipo, alumno_id=None):
         except ValidationError:
             return JsonResponse({"error": "La evaluación no coincide con la tarea y el grupo."}, status=400)
         vigente = actuales.select_related("autor", "alumno").order_by("-fecha_creacion", "-pk")
-        if vigente.count() == 1:
-            existente = vigente.first()
-            if existente.calificacion == grade and existente.comentario == comment:
-                return JsonResponse({
-                    "evaluacion": _serializar_evaluacion(existente),
-                    "sin_cambios": True,
-                })
-        # Retire the previous current version only after the replacement validates.
-        actuales.update(anulada_en=timezone.now(), anulada_por=request.user)
+        existente = vigente.first()
+        if existente and existente.calificacion == grade and existente.comentario == comment:
+            return JsonResponse({
+                "evaluacion": _serializar_evaluacion(existente, request.user),
+                "sin_cambios": True,
+            })
         evaluacion.save()
+        if grade is not None or comment:
+            tarea.calificacion = grade
+            tarea.retroalimentacion = comment
+            tarea.evaluado_por = request.user
+            tarea.save(update_fields=("calificacion", "retroalimentacion", "evaluado_por"))
         from core.models import Notificacion
         recipients = [alumno] if alumno else list(tarea.proyecto.integrantes.all())
         if not alumno and tarea.proyecto.creador_id not in {u.pk for u in recipients}:

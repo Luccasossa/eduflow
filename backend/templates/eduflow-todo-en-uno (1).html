@@ -1519,9 +1519,10 @@ nav {
                 <button type="button" class="close-modal" data-close aria-label="Cerrar">×</button>
             </div>
             <p id="evaluationTaskTitle" class="muted"></p>
+            <div id="taskEvaluationHistory" class="project-feedback-history"></div>
             <div class="form-field">
                 <label for="evaluationGrade">Calificación</label>
-                <input id="evaluationGrade" type="number" min="0" max="{{ calificacion_maxima }}" step="0.01" required>
+                <input id="evaluationGrade" type="number" min="0" max="{{ calificacion_maxima }}" step="0.01">
             </div>
             <div class="form-field">
                 <label for="evaluationFeedback">Retroalimentación</label>
@@ -1536,6 +1537,11 @@ nav {
                 <button type="submit" class="primary-button">Guardar evaluación</button>
             </div>
         </form>
+    </dialog>
+
+    <dialog class="modal modal-small" id="teacherTaskDetailModal" aria-labelledby="teacherTaskDetailTitle">
+        <div class="modal-header"><h2 id="teacherTaskDetailTitle">Detalle de tarea</h2><button type="button" class="close-modal" data-close aria-label="Cerrar">×</button></div>
+        <div id="teacherTaskDetailContent"></div>
     </dialog>
 
 
@@ -1560,6 +1566,8 @@ nav {
 
     var state = { projectId: null, docId: null, editingTaskId: null, editingDocument: null, nextTaskId: 100 };
     var evaluationTask = null;
+    var editingEvaluationId = null;
+    var editingProjectFeedbackId = null;
     var teacherDocumentSession = 0;
     var teacherDocumentSaving = false;
     var teacherDocumentLoading = false;
@@ -1587,12 +1595,14 @@ nav {
                     id: task.id,
                     title: task.titulo,
                     desc: task.descripcion,
+                    createdAt: task.fecha_creacion,
                     date: task.fecha_vencimiento,
                     column: task.estado === 'completada' ? 'done' : (task.estado === 'en_progreso' ? 'progress' : 'todo'),
                     priority: task.prioridad,
                     grade: task.calificacion,
                     feedback: task.retroalimentacion,
                     attachments: task.archivos_adjuntos || [],
+                    feedbackHistory: task.devoluciones || [],
                     deliveries: [],
                     groupEvaluation: null,
                     individualEvaluations: []
@@ -1643,6 +1653,7 @@ nav {
                             task.deliveries = data[0].entregas;
                             task.groupEvaluation = data[1].grupal;
                             task.individualEvaluations = data[1].individuales;
+                            task.feedbackHistory = data[1].historial || task.feedbackHistory;
                         });
                     })).then(function () { return mapped; });
                 })).then(function (loadedProjects) {
@@ -1838,12 +1849,13 @@ nav {
     function renderProjectFeedback(project) {
         var box = $('projectFeedbackHistory');
         if (!box) return;
+        var projectEntries = project.devoluciones.filter(function (entry) { return !entry.tarea_id && !entry.documento_id; });
         box.replaceChildren(el('h3', null, 'Historial de devoluciones'));
-        if (!project.devoluciones.length) {
+        if (!projectEntries.length) {
             box.appendChild(el('p', 'muted', 'Todavía no hay devoluciones para este proyecto.'));
             return;
         }
-        project.devoluciones.forEach(function (entry) {
+        projectEntries.forEach(function (entry) {
             var item = el('article', 'project-feedback-entry');
             var evaluationLabel = entry.tipo === 'grupal' ? 'Evaluación grupal'
                 : entry.tipo === 'individual' ? 'Evaluación individual · ' + entry.alumno
@@ -1861,14 +1873,41 @@ nav {
             if (entry.tarea || entry.documento) item.appendChild(el('p', 'muted', 'Sobre ' + (entry.tarea || entry.documento)));
             if (entry.comentario) item.appendChild(el('p', null, entry.comentario));
             if (entry.calificacion) item.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
+            if (entry.puede_editar) {
+                var actions = el('div', 'modal-actions');
+                var edit = el('button', 'text-button', 'Editar devoluciÃ³n');
+                edit.type = 'button';
+                edit.addEventListener('click', function () { openProjectFeedbackEditor(entry); });
+                var remove = el('button', 'danger-button', 'Eliminar');
+                remove.type = 'button';
+                remove.addEventListener('click', function () {
+                    if (!window.confirm('Â¿Eliminar esta devoluciÃ³n?')) return;
+                    requestJson('/proyectos/api/devoluciones/' + entry.id + '/', { method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() } })
+                        .then(function () { return refreshEvaluationProject('DevoluciÃ³n eliminada.'); })
+                        .catch(function (error) { toast(error.message || 'No se pudo eliminar la devoluciÃ³n.'); });
+                });
+                actions.append(edit, remove);
+                item.appendChild(actions);
+            }
             box.appendChild(item);
         });
     }
 
+    function openProjectFeedbackEditor(entry) {
+        editingProjectFeedbackId = entry.id;
+        $('projectEvaluationGrade').value = entry.calificacion || '';
+        $('projectEvaluationComment').value = entry.comentario || '';
+        $('projectEvaluationTitle').textContent = 'Editar devoluci\u00f3n';
+        $('projectEvaluationError').textContent = '';
+        $('projectEvaluationModal').showModal();
+    }
+
     function initProjectEvaluation() {
         $('gradeProjectBtn').addEventListener('click', function () {
+            editingProjectFeedbackId = null;
             $('projectEvaluationGrade').value = '';
             $('projectEvaluationComment').value = '';
+            $('projectEvaluationTitle').textContent = 'Nueva devoluci\u00f3n del proyecto';
             $('projectEvaluationError').textContent = '';
             $('projectEvaluationModal').showModal();
         });
@@ -1876,10 +1915,15 @@ nav {
             event.preventDefault();
             var payload = { comentario: $('projectEvaluationComment').value.trim() };
             if ($('projectEvaluationGrade').value !== '') payload.calificacion = $('projectEvaluationGrade').value;
-            requestJson('/proyectos/api/' + state.projectId + '/devoluciones/', {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() }, body: JSON.stringify(payload)
+            if (!payload.comentario && payload.calificacion === undefined) {
+                $('projectEvaluationError').textContent = 'Escribe un comentario o una calificaci\u00f3n.';
+                return;
+            }
+            requestJson(editingProjectFeedbackId ? '/proyectos/api/devoluciones/' + editingProjectFeedbackId + '/' : '/proyectos/api/' + state.projectId + '/devoluciones/', {
+                method: editingProjectFeedbackId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() }, body: JSON.stringify(payload)
             }).then(function () {
                 $('projectEvaluationModal').close();
+                editingProjectFeedbackId = null;
                 return loadProjects();
             }).then(function () { openProject(state.projectId); toast('Devolución guardada.'); })
                 .catch(function (error) { $('projectEvaluationError').textContent = error.message; });
@@ -1916,6 +1960,10 @@ nav {
             tasks.forEach(function (t) {
                 var card = el('div', 'kanban-card' + (col.key === 'done' ? ' completed' : ''));
                 card.appendChild(el('strong', null, t.title));
+                var detailsButton = el('button', 'text-button', 'Ver tarea');
+                detailsButton.type = 'button';
+                detailsButton.dataset.viewTaskId = t.id;
+                card.appendChild(detailsButton);
                 if (t.desc) card.appendChild(el('p', null, t.desc));
                 card.appendChild(el('p', 'task-priority-label', 'Prioridad: ' + (t.priority || 'media')));
 
@@ -1955,8 +2003,7 @@ nav {
                 var dateText = col.key === 'done' ? '✓ Finalizado' : (t.date ? '📅 ' + formatDate(t.date) : 'Sin fecha');
                 var date = el('span', 'card-date' + (col.key !== 'done' && isOverdue(t.date) ? ' overdue' : ''), dateText);
                 footer.appendChild(date);
-
-                var review = el('button', 'text-button', t.groupEvaluation ? 'Ver / editar evaluación grupal e individual' : 'Evaluar grupo e integrantes');
+                var review = el('button', 'text-button', 'Ver historial y dejar devoluci?n');
                 review.type = 'button';
                 review.dataset.gradeTaskId = t.id;
                 footer.appendChild(review);
@@ -1965,6 +2012,19 @@ nav {
                 if (t.groupEvaluation) {
                     card.appendChild(el('p', 'task-grade', 'Evaluación grupal: ' + (t.groupEvaluation.calificacion || 'Sin nota')));
                     if (t.groupEvaluation.comentario) card.appendChild(el('p', 'task-feedback', t.groupEvaluation.comentario));
+                }
+                if (t.feedbackHistory && t.feedbackHistory.length) {
+                    var history = el('div', 'project-feedback-history');
+                    history.appendChild(el('strong', null, 'Historial de devoluciones de la tarea'));
+                    t.feedbackHistory.forEach(function (entry) {
+                        if (entry.anulada) return;
+                        var feedback = el('article', 'project-feedback-entry');
+                        feedback.appendChild(el('strong', null, entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+                        if (entry.comentario) feedback.appendChild(el('p', null, entry.comentario));
+                        if (entry.calificacion !== '') feedback.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
+                        history.appendChild(feedback);
+                    });
+                    card.appendChild(history);
                 }
                 if (t.grade) card.appendChild(el('p', 'muted', 'Calificación histórica de tarea: ' + t.grade));
                 column.appendChild(card);
@@ -2064,8 +2124,83 @@ nav {
         });
     }
 
+    function editTaskFeedback(entry) {
+        editingEvaluationId = entry.id;
+        $('evaluationTaskTitle').textContent = 'Editar devolución de ' + evaluationTask.title;
+        $('evaluationGrade').value = entry.calificacion || '';
+        $('evaluationFeedback').value = entry.comentario || '';
+        $('evaluationError').textContent = '';
+        $('evaluationForm').querySelector('[type="submit"]').textContent = 'Guardar cambios';
+    }
+
+    function renderTaskEvaluationHistory(task) {
+        var box = $('taskEvaluationHistory');
+        box.replaceChildren(el('h3', null, 'Historial de devoluciones'));
+        if (!task.feedbackHistory || !task.feedbackHistory.length) {
+            box.appendChild(el('p', 'muted', 'Todavía no hay devoluciones.'));
+            return;
+        }
+        task.feedbackHistory.forEach(function (entry) {
+            var item = el('article', 'project-feedback-entry');
+            item.appendChild(el('strong', null, (entry.tipo === 'individual' ? 'Individual · ' + entry.alumno : 'Grupal') + ' · ' + entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+            if (entry.anulada) item.appendChild(el('p', 'muted', 'Versión anterior o devolución eliminada.'));
+            if (entry.comentario) item.appendChild(el('p', null, entry.comentario));
+            if (entry.calificacion !== '') item.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
+            if (entry.puede_editar) {
+                var actions = el('div', 'modal-actions');
+                var edit = el('button', 'text-button', 'Editar');
+                edit.type = 'button';
+                edit.addEventListener('click', function () { editTaskFeedback(entry); });
+                var remove = el('button', 'danger-button', 'Eliminar');
+                remove.type = 'button';
+                remove.addEventListener('click', function () {
+                    if (!window.confirm('¿Eliminar esta devolución?')) return;
+                    requestJson('/proyectos/api/devoluciones/' + entry.id + '/', { method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() } })
+                        .then(function () { $('evaluationModal').close(); return refreshEvaluationProject('Devolución eliminada.'); })
+                        .catch(function (error) { $('evaluationError').textContent = error.message; });
+                });
+                actions.append(edit, remove);
+                item.appendChild(actions);
+            }
+            box.appendChild(item);
+        });
+    }
+
+    function showTeacherTaskDetail(task) {
+        var box = $('teacherTaskDetailContent');
+        box.replaceChildren();
+        box.appendChild(el('p', 'muted', currentProject().name + ' · ' + currentProject().members.join(', ')));
+        box.appendChild(el('p', null, task.desc || 'Sin descripción.'));
+        box.appendChild(el('p', 'muted', 'Creada: ' + formatDate(task.createdAt ? task.createdAt.slice(0, 10) : '') + ' · Entrega: ' + (task.date ? formatDate(task.date) : 'Sin fecha') + ' · Estado: ' + task.column));
+        box.appendChild(el('h3', null, 'Archivos adjuntos'));
+        (task.attachments || []).forEach(function (file) {
+            var link = el('a', 'text-button', 'Abrir ' + file.nombre);
+            link.href = file.abrir; link.target = '_blank'; link.rel = 'noopener noreferrer'; box.appendChild(link);
+        });
+        task.deliveries.forEach(function (delivery) {
+            var link = el('a', 'text-button', 'Descargar ' + delivery.nombre);
+            link.href = delivery.descarga; box.appendChild(link);
+        });
+        box.appendChild(el('h3', null, 'Devoluciones y calificaciones'));
+        (task.feedbackHistory || []).filter(function (entry) { return !entry.anulada; }).forEach(function (entry) {
+            var row = el('article', 'project-feedback-entry');
+            row.appendChild(el('strong', null, entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+            if (entry.comentario) row.appendChild(el('p', null, entry.comentario));
+            if (entry.calificacion !== '') row.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
+            box.appendChild(row);
+        });
+        $('teacherTaskDetailTitle').textContent = task.title;
+        $('teacherTaskDetailModal').showModal();
+    }
+
     function initKanban() {
         $('kanbanBoard').addEventListener('click', function (event) {
+            var details = event.target.closest('[data-view-task-id]');
+            if (details) {
+                var detailTask = currentProject().tasks.filter(function (item) { return item.id === Number(details.dataset.viewTaskId); })[0];
+                if (detailTask) showTeacherTaskDetail(detailTask);
+                return;
+            }
             var button = event.target.closest('[data-grade-task-id]');
             if (!button) return;
             var task = currentProject().tasks.filter(function (item) {
@@ -2073,11 +2208,14 @@ nav {
             })[0];
             if (!task) return;
             evaluationTask = task;
+            editingEvaluationId = null;
             $('evaluationTaskTitle').textContent = task.title;
-            $('evaluationGrade').value = task.groupEvaluation ? task.groupEvaluation.calificacion : '';
-            $('evaluationFeedback').value = task.groupEvaluation ? task.groupEvaluation.comentario : '';
+            $('evaluationGrade').value = '';
+            $('evaluationFeedback').value = '';
             $('evaluationError').textContent = '';
-            $('deleteGroupEvaluationBtn').hidden = !task.groupEvaluation;
+            $('deleteGroupEvaluationBtn').hidden = true;
+            $('evaluationForm').querySelector('[type="submit"]').textContent = 'Publicar devolución';
+            renderTaskEvaluationHistory(task);
             renderIndividualEvaluations(task);
             $('evaluationModal').showModal();
         });
@@ -2094,12 +2232,19 @@ nav {
                 calificacion: $('evaluationGrade').value,
                 comentario: $('evaluationFeedback').value.trim()
             };
-            requestJson('/tareas/api/' + evaluationTask.id + '/evaluaciones/grupal/', {
-                method: 'POST',
+            if (!payload.calificacion && !payload.comentario) {
+                $('evaluationError').textContent = 'Escribe un comentario o una calificaci\u00f3n.';
+                save.disabled = false;
+                save.textContent = originalLabel;
+                return;
+            }
+            requestJson(editingEvaluationId ? '/proyectos/api/devoluciones/' + editingEvaluationId + '/' : '/tareas/api/' + evaluationTask.id + '/evaluaciones/grupal/', {
+                method: editingEvaluationId ? 'PATCH' : 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
                 body: JSON.stringify(payload)
             }).then(function () {
                 $('evaluationModal').close();
+                editingEvaluationId = null;
                 return refreshEvaluationProject('Evaluación grupal guardada.');
             }).catch(function (error) {
                 $('evaluationError').textContent = error.message || 'No se pudo guardar la evaluación.';

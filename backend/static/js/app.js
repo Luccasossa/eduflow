@@ -460,8 +460,82 @@
 
     const taskModal = $("#taskModal");
     const projectModal = $("#projectModal");
+    const taskDetailModal = $("#taskDetailModal");
+    const projectDetailModal = $("#projectDetailModal");
     function closeTaskModal() { taskModal?.classList.remove("show"); }
     function closeProjectModal() { projectModal?.classList.remove("show"); }
+    function closeTaskDetail() { taskDetailModal?.classList.remove("show"); }
+    function closeProjectDetail() { projectDetailModal?.classList.remove("show"); }
+
+    async function openTaskDetails(taskId) {
+        try {
+            const task = (await api(`${taskUrl}${taskId}/`)).tarea;
+            const content = $("#taskDetailContent");
+            content.replaceChildren();
+            const taskTitle = make("h2", "", task.titulo);
+            taskTitle.id = "taskDetailTitle";
+            content.appendChild(taskTitle);
+            content.appendChild(make("p", "", task.descripcion || "Sin descripción."));
+            const project = projects.find((item) => item.id === task.proyecto_id);
+            content.appendChild(make("p", "", `Creada: ${dateLabel(task.fecha_creacion?.slice(0, 10))} · Entrega: ${dateLabel(task.fecha_vencimiento)} · Prioridad: ${task.prioridad} · Estado: ${states.find(([value]) => value === task.estado)?.[1] || task.estado}${project ? ` · Proyecto: ${project.nombre}` : ""}`));
+            content.appendChild(make("h3", "", "Archivos adjuntos"));
+            const files = make("div", "detail-attachments");
+            appendAttachments(files, task.archivos_adjuntos, `${taskUrl}${task.id}/archivos/`);
+            if (!task.archivos_adjuntos.length) files.appendChild(make("p", "empty-state", "No hay archivos adjuntos."));
+            content.appendChild(files);
+            const attach = make("button", "secondary-button", "Adjuntar archivos");
+            attach.type = "button";
+            attach.addEventListener("click", async () => { await attachExisting(`${taskUrl}${task.id}/archivos/`); await openTaskDetails(task.id); });
+            content.appendChild(attach);
+            content.appendChild(make("h3", "", "Devoluciones y calificaciones"));
+            if (!task.devoluciones.length) content.appendChild(make("p", "empty-state", "Todavía no hay devoluciones para esta tarea."));
+            task.devoluciones.forEach((entry) => {
+                const item = make("article", "project-feedback-entry");
+                item.appendChild(make("strong", "", `${entry.autor} · ${new Date(entry.fecha).toLocaleString("es-AR")}`));
+                if (entry.comentario) item.appendChild(make("p", "", entry.comentario));
+                if (entry.calificacion !== "") item.appendChild(make("p", "", `Calificación: ${entry.calificacion}/10`));
+                content.appendChild(item);
+            });
+            taskDetailModal.classList.add("show");
+        } catch (error) { notify(error.message, true); }
+    }
+
+    function openProjectDetails(project) {
+        const content = $("#projectDetailContent");
+        content.replaceChildren();
+        const projectTitle = make("h2", "", project.nombre);
+        projectTitle.id = "projectDetailTitle";
+        content.appendChild(projectTitle);
+        content.appendChild(make("p", "", project.descripcion || "Sin descripción."));
+        content.appendChild(make("p", "", `Entrega: ${dateLabel(project.fecha_entrega)} · Progreso: ${project.progreso}%`));
+        content.appendChild(make("p", "", `Integrantes: ${project.integrantes.map((member) => member.nombre).join(", ")}`));
+        content.appendChild(make("h3", "", "Archivos del proyecto"));
+        appendAttachments(content, project.archivos_adjuntos, project.puede_adjuntar ? `${projectUrl}${project.id}/archivos/` : "");
+        if (!project.archivos_adjuntos.length) content.appendChild(make("p", "empty-state", "No hay archivos adjuntos al proyecto."));
+        content.appendChild(make("h3", "", "Tareas del equipo"));
+        project.tareas.forEach((task) => {
+            const row = make("article", "project-feedback-entry");
+            row.appendChild(make("strong", "", task.titulo));
+            row.appendChild(make("p", "", `${task.estado} · ${task.prioridad} · Entrega: ${dateLabel(task.fecha_vencimiento)}`));
+            appendAttachments(row, task.archivos_adjuntos);
+            const open = make("button", "text-button", "Ver tarea");
+            open.type = "button";
+            open.addEventListener("click", () => { closeProjectDetail(); openTaskDetails(task.id); });
+            row.appendChild(open);
+            content.appendChild(row);
+        });
+        content.appendChild(make("h3", "", "Devoluciones generales del proyecto"));
+        const projectEntries = project.devoluciones.filter((entry) => !entry.tarea_id && !entry.documento_id);
+        if (!projectEntries.length) content.appendChild(make("p", "empty-state", "Todavía no hay devoluciones generales."));
+        projectEntries.forEach((entry) => {
+            const item = make("article", "project-feedback-entry");
+            item.appendChild(make("strong", "", `${entry.autor} · ${new Date(entry.fecha).toLocaleString("es-AR")}`));
+            if (entry.comentario) item.appendChild(make("p", "", entry.comentario));
+            if (entry.calificacion !== "") item.appendChild(make("p", "", `Calificación: ${entry.calificacion}/10`));
+            content.appendChild(item);
+        });
+        projectDetailModal.classList.add("show");
+    }
 
     function renderTasks() {
         const board = $("#personalKanban");
@@ -481,6 +555,9 @@
                 if (task.descripcion) card.appendChild(make("p", "", task.descripcion));
                 card.appendChild(make("span", "card-date", `${dateLabel(task.fecha_vencimiento)} · Prioridad ${task.prioridad}`));
                 const actions = make("div", "task-card-actions");
+                const view = make("button", "text-button", "Ver tarea");
+                view.type = "button";
+                view.addEventListener("click", () => openTaskDetails(task.id));
                 const stateSelect = document.createElement("select");
                 stateSelect.setAttribute("aria-label", `Estado de ${task.titulo}`);
                 states.forEach(([value, text]) => {
@@ -497,7 +574,7 @@
                 const remove = make("button", "text-button danger-text", "Eliminar");
                 remove.type = "button";
                 remove.addEventListener("click", () => deleteTask(task));
-                actions.append(stateSelect, edit, remove);
+                actions.append(view, stateSelect, edit, remove);
                 const attach = make("button", "text-button", "Adjuntar archivos");
                 attach.type = "button";
                 attach.addEventListener("click", () => attachExisting(`${taskUrl}${task.id}/archivos/`));
@@ -623,6 +700,10 @@
             const card = make("article", "project-card");
             card.appendChild(make("div", "project-icon", "▣"));
             card.appendChild(make("h3", "", project.nombre));
+            const viewProject = make("button", "text-button", "Ver proyecto");
+            viewProject.type = "button";
+            viewProject.addEventListener("click", () => openProjectDetails(project));
+            card.appendChild(viewProject);
             card.appendChild(make("p", "", project.descripcion || "Sin descripción."));
             card.appendChild(make("p", "project-due-date", `Entrega: ${dateLabel(project.fecha_entrega)}`));
             const progress = make("div", "progress");
@@ -664,6 +745,10 @@
                 details.appendChild(make("strong", "", task.titulo));
                 details.appendChild(make("small", "", `${states.find(([value]) => value === task.estado)?.[1] || task.estado} · ${task.prioridad} · ${dateLabel(task.fecha_vencimiento)}`));
                 row.appendChild(details);
+                const viewTask = make("button", "text-button", "Ver tarea");
+                viewTask.type = "button";
+                viewTask.addEventListener("click", () => openTaskDetails(task.id));
+                row.appendChild(viewTask);
 
                 const deliveryPanel = make("div", "group-delivery-panel");
                 deliveryPanel.appendChild(make("strong", "", "Entrega grupal"));
@@ -742,10 +827,11 @@
                 taskList.appendChild(row);
             });
             card.appendChild(taskList);
-            if (project.devoluciones && project.devoluciones.length) {
+            const projectFeedback = project.devoluciones.filter((entry) => !entry.tarea_id && !entry.documento_id);
+            if (projectFeedback.length) {
                 const feedback = make("div", "project-feedback-history");
                 feedback.appendChild(make("h4", "", "Devoluciones docentes"));
-                project.devoluciones.forEach((entry) => {
+                projectFeedback.forEach((entry) => {
                     const item = make("article", "project-feedback-entry");
                     const label = entry.tipo === "grupal" ? "Evaluación grupal"
                         : entry.tipo === "individual" ? `Evaluación individual · ${entry.alumno}`
@@ -840,6 +926,10 @@
     $$('[data-close-project]').forEach((button) => button.addEventListener("click", closeProjectModal));
     taskModal?.addEventListener("click", (event) => { if (event.target === taskModal) closeTaskModal(); });
     projectModal?.addEventListener("click", (event) => { if (event.target === projectModal) closeProjectModal(); });
+    taskDetailModal?.addEventListener("click", (event) => { if (event.target === taskDetailModal) closeTaskDetail(); });
+    projectDetailModal?.addEventListener("click", (event) => { if (event.target === projectDetailModal) closeProjectDetail(); });
+    $$('[data-close-task-detail]').forEach((button) => button.addEventListener("click", closeTaskDetail));
+    $$('[data-close-project-detail]').forEach((button) => button.addEventListener("click", closeProjectDetail));
     ["#filterTaskStatus", "#filterTaskPriority", "#filterTaskFrom", "#filterTaskTo"].forEach((selector) => {
         $(selector)?.addEventListener("change", loadTasks);
     });

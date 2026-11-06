@@ -243,6 +243,34 @@ class TablerosTests(TestCase):
         self.assertEqual(self.json_post(url, {"calificacion": 10}).status_code, 403)
         self.assertEqual(proyecto.devoluciones.count(), 2)
 
+    def test_devolucion_general_proyecto_se_edita_y_elimina_sin_mezclar_tareas(self):
+        from proyectos.models import DevolucionDocente
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Tarea separada")
+        self.client.force_login(self.profesor)
+        url = reverse("api_devoluciones", args=[proyecto.pk])
+        response = self.json_post(url, {"comentario": "Devolución general", "calificacion": "8.25"})
+        self.assertEqual(response.status_code, 201)
+        original_id = response.json()["devolucion"]["id"]
+        replacement = self.client.patch(
+            reverse("api_devolucion", args=[original_id]),
+            data=json.dumps({"comentario": "Proyecto mejorado"}),
+            content_type="application/json",
+        )
+        self.assertEqual(replacement.status_code, 201)
+        current_id = replacement.json()["devolucion"]["id"]
+        self.assertEqual(DevolucionDocente.objects.get(pk=current_id).reemplaza_id, original_id)
+        self.assertEqual(DevolucionDocente.objects.filter(proyecto=proyecto, anulada_en__isnull=True).count(), 1)
+        self.assertFalse(tarea.devoluciones.exists())
+
+        self.client.force_login(self.alumno)
+        entries = self.client.get(reverse("api_proyecto", args=[proyecto.pk])).json()["proyecto"]["devoluciones"]
+        self.assertEqual([entry["id"] for entry in entries], [current_id])
+        self.assertEqual(self.client.delete(reverse("api_devolucion", args=[current_id])).status_code, 404)
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.delete(reverse("api_devolucion", args=[current_id])).status_code, 200)
+
     def test_alumno_no_puede_calificar_y_profesor_no_puede_mutar_tareas(self):
         proyecto = self.crear_proyecto()
         tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Entrega")
@@ -526,10 +554,9 @@ class TablerosTests(TestCase):
         )
         self.assertEqual(corrected.status_code, 201)
         self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, tipo="grupal").count(), 2)
-        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, tipo="grupal", anulada_en__isnull=True).count(), 1)
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, tipo="grupal", anulada_en__isnull=True).count(), 2)
         previous = DevolucionDocente.objects.get(pk=created.json()["evaluacion"]["id"])
-        self.assertIsNotNone(previous.anulada_en)
-        self.assertEqual(previous.anulada_por, self.profesor)
+        self.assertIsNone(previous.anulada_en)
 
         individual_url = reverse("api_evaluacion_individual", args=[tarea.pk, self.alumno.pk])
         individual_payload = json.dumps({"calificacion": "7.50", "comentario": "Aporte individual."})
@@ -542,6 +569,42 @@ class TablerosTests(TestCase):
             DevolucionDocente.objects.filter(tarea=tarea, tipo="individual", alumno=self.alumno, anulada_en__isnull=True).count(),
             1,
         )
+
+    def test_devoluciones_independientes_edicion_versionada_y_eliminacion_protegida(self):
+        from proyectos.models import DevolucionDocente
+
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Ensayo")
+        url = reverse("api_evaluacion_grupal", args=[tarea.pk])
+        self.client.force_login(self.profesor)
+        comment_only = self.client.post(url, data=json.dumps({"comentario": "Revisar la conclusión."}), content_type="application/json")
+        grade_only = self.client.post(url, data=json.dumps({"calificacion": "8.75"}), content_type="application/json")
+        self.assertEqual(comment_only.status_code, 201)
+        self.assertEqual(grade_only.status_code, 201)
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, anulada_en__isnull=True).count(), 2)
+        history = self.client.get(reverse("api_evaluaciones", args=[tarea.pk])).json()["historial"]
+        self.assertEqual(len(history), 2)
+
+        feedback_id = comment_only.json()["evaluacion"]["id"]
+        edit_url = reverse("api_devolucion", args=[feedback_id])
+        edited = self.client.patch(
+            edit_url,
+            data=json.dumps({"comentario": "Conclusión corregida.", "calificacion": "9.00"}),
+            content_type="application/json",
+        )
+        self.assertEqual(edited.status_code, 201, edited.content)
+        replacement_id = edited.json()["devolucion"]["id"]
+        replacement = DevolucionDocente.objects.get(pk=replacement_id)
+        self.assertEqual(replacement.reemplaza_id, feedback_id)
+        self.assertEqual(DevolucionDocente.objects.get(pk=feedback_id).anulada_por, self.profesor)
+        self.assertEqual(DevolucionDocente.objects.filter(tarea=tarea, anulada_en__isnull=True).count(), 2)
+
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.delete(reverse("api_devolucion", args=[replacement_id])).status_code, 404)
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.delete(reverse("api_devolucion", args=[replacement_id])).status_code, 200)
+        self.assertIsNotNone(DevolucionDocente.objects.get(pk=replacement_id).anulada_en)
 
 
     def test_evaluaciones_rechazan_notas_invalidas_y_post_sin_csrf(self):
