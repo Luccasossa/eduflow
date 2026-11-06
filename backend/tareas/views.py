@@ -15,6 +15,7 @@ from proyectos.models import Proyecto
 from proyectos.models import DevolucionDocente
 from proyectos.permissions import profesor_autorizado
 from .models import Entrega, Tarea
+from .prioridad import prioridad_para, sincronizar_prioridades
 
 
 def _rol(usuario):
@@ -61,7 +62,8 @@ def _fecha(value):
         raise ValueError("La fecha debe tener formato AAAA-MM-DD.")
 
 
-def _serializar(tarea):
+def _serializar(tarea, usuario=None):
+    sincronizar_prioridades((tarea,))
     return {
         "id": tarea.id,
         "titulo": tarea.titulo,
@@ -72,6 +74,10 @@ def _serializar(tarea):
         "proyecto_id": tarea.proyecto_id,
         "calificacion": str(tarea.calificacion) if tarea.calificacion is not None else "",
         "retroalimentacion": tarea.retroalimentacion,
+        "archivos_adjuntos": [
+            {"id": f.pk, "nombre": f.nombre_original, "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
+            for f in tarea.archivos_adjuntos.all()
+        ],
     }
 
 
@@ -107,17 +113,15 @@ def _tarea_autorizada(request, pk):
 def _validar_campos(data, tarea=None):
     titulo = str(data.get("titulo", tarea.titulo if tarea else "")).strip()
     descripcion = str(data.get("descripcion", tarea.descripcion if tarea else "")).strip()
-    prioridad = data.get("prioridad", tarea.prioridad if tarea else "media")
     estado = data.get("estado", tarea.estado if tarea else "pendiente")
     if not titulo or len(titulo) > 150:
         raise ValueError("El título es obligatorio y admite hasta 150 caracteres.")
     if len(descripcion) > 20000:
         raise ValueError("La descripción supera el límite permitido.")
-    if not isinstance(prioridad, str) or prioridad not in dict(Tarea.PRIORIDADES):
-        raise ValueError("Selecciona una prioridad válida.")
     if not isinstance(estado, str) or estado not in dict(Tarea.ESTADOS):
         raise ValueError("Selecciona un estado válido.")
     fecha = _fecha(data.get("fecha_vencimiento", tarea.fecha_vencimiento.isoformat() if tarea and tarea.fecha_vencimiento else ""))
+    prioridad = prioridad_para(fecha)
     return {"titulo": titulo, "descripcion": descripcion, "prioridad": prioridad, "estado": estado, "fecha_vencimiento": fecha}
 
 
@@ -143,6 +147,8 @@ def api_tareas(request):
             if not request.user.is_superuser:
                 tareas = tareas.filter(proyecto__profesores=request.user)
 
+        sincronizar_prioridades(list(tareas))
+
         estado = request.GET.get("estado", "")
         prioridad = request.GET.get("prioridad", "")
         if request.GET.get("desde") and request.GET.get("hasta"):
@@ -165,7 +171,7 @@ def api_tareas(request):
                     tareas = tareas.filter(**{lookup: _fecha(request.GET[key])})
                 except ValueError as exc:
                     return JsonResponse({"error": str(exc)}, status=400)
-        return JsonResponse({"tareas": [_serializar(t) for t in tareas.order_by("fecha_vencimiento", "id")]})
+        return JsonResponse({"tareas": [_serializar(t, request.user) for t in tareas.order_by("fecha_vencimiento", "id")]})
 
     if rol != "alumno":
         return JsonResponse({"error": "Solo los alumnos pueden crear tareas."}, status=403)
@@ -184,9 +190,11 @@ def api_tareas(request):
         return JsonResponse({"error": str(exc)}, status=400)
     with transaction.atomic():
         tarea = Tarea.objects.create(creador=request.user, proyecto=proyecto, **fields)
+        from core.models import Actividad
+        Actividad.objects.create(usuario=request.user, descripcion=f"Creaste la tarea {tarea.titulo}.", tipo="tarea", tarea=tarea)
         if proyecto:
             proyecto.actualizar_progreso()
-    return JsonResponse({"tarea": _serializar(tarea)}, status=201)
+    return JsonResponse({"tarea": _serializar(tarea, request.user)}, status=201)
 
 
 @login_required
@@ -194,7 +202,7 @@ def api_tareas(request):
 def api_tarea(request, pk):
     tarea = _tarea_autorizada(request, pk)
     if request.method == "GET":
-        return JsonResponse({"tarea": _serializar(tarea)})
+        return JsonResponse({"tarea": _serializar(tarea, request.user)})
     rol = _rol(request.user)
     if rol != "alumno":
         return JsonResponse({"error": "Los profesores solo pueden revisar y calificar tareas."}, status=403)
@@ -213,12 +221,16 @@ def api_tarea(request, pk):
     except ValueError as exc:
         return JsonResponse({"error": str(exc)}, status=400)
     with transaction.atomic():
+        old_state = tarea.estado
         for key, value in fields.items():
             setattr(tarea, key, value)
         tarea.save(update_fields=(*fields.keys(),))
+        if old_state != "completada" and tarea.estado == "completada":
+            from core.models import Actividad
+            Actividad.objects.create(usuario=request.user, descripcion=f"Completaste la tarea {tarea.titulo}.", tipo="tarea", tarea=tarea)
         if tarea.proyecto_id:
             tarea.proyecto.actualizar_progreso()
-    return JsonResponse({"tarea": _serializar(tarea)})
+    return JsonResponse({"tarea": _serializar(tarea, request.user)})
 
 
 @login_required
@@ -259,7 +271,39 @@ def api_calificar_tarea(request, pk):
         tarea.retroalimentacion = retroalimentacion
         tarea.evaluado_por = request.user
         tarea.save(update_fields=("calificacion", "retroalimentacion", "evaluado_por"))
-    return JsonResponse({"tarea": _serializar(tarea)})
+        integrantes = list(tarea.proyecto.integrantes.all())
+        if tarea.proyecto.creador_id not in {persona.pk for persona in integrantes}:
+            integrantes.append(tarea.proyecto.creador)
+        from core.models import Actividad, Notificacion
+        for alumno in integrantes:
+            message = f"Tu tarea {tarea.titulo} fue calificada. Nota: {calificacion}."
+            Notificacion.objects.create(usuario=alumno, tarea=tarea, tipo="calificacion", mensaje=message)
+            Actividad.objects.create(usuario=alumno, tarea=tarea, tipo="calificacion", descripcion=message)
+    return JsonResponse({"tarea": _serializar(tarea, request.user)})
+
+
+@login_required
+@require_http_methods(["GET", "POST", "DELETE"])
+def api_archivos_tarea(request, pk):
+    from archivos.models import Archivo
+    tarea = _tarea_autorizada(request, pk)
+    if request.method == "GET":
+        return JsonResponse({"archivos": _serializar(tarea, request.user)["archivos_adjuntos"]})
+    if _rol(request.user) != "alumno" or (tarea.proyecto_id is None and tarea.creador_id != request.user.pk):
+        return JsonResponse({"error": "Solo el alumno puede gestionar sus archivos adjuntos."}, status=403)
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "Solicitud no válida."}, status=400)
+    archivo = get_object_or_404(Archivo, pk=data.get("archivo_id"), propietario=request.user)
+    if request.method == "POST":
+        already_attached = tarea.archivos_adjuntos.filter(pk=archivo.pk).exists()
+        tarea.archivos_adjuntos.add(archivo)
+        if not already_attached:
+            from core.models import Actividad
+            Actividad.objects.create(usuario=request.user, descripcion=f"Adjuntaste {archivo.nombre_original} a la tarea {tarea.titulo}.", tipo="adjunto", tarea=tarea, archivo=archivo)
+        return JsonResponse({"adjuntado": True})
+    tarea.archivos_adjuntos.remove(archivo)
+    return JsonResponse({"quitado": True})
 
 
 def _serializar_entrega(entrega):
@@ -409,6 +453,17 @@ def _guardar_o_anular_evaluacion(request, pk, tipo, alumno_id=None):
         # Retire the previous current version only after the replacement validates.
         actuales.update(anulada_en=timezone.now(), anulada_por=request.user)
         evaluacion.save()
+        from core.models import Notificacion
+        recipients = [alumno] if alumno else list(tarea.proyecto.integrantes.all())
+        if not alumno and tarea.proyecto.creador_id not in {u.pk for u in recipients}:
+            recipients.append(tarea.proyecto.creador)
+        for recipient in recipients:
+            message = f"El profesor dejó una devolución en la tarea {tarea.titulo}."
+            if grade is not None:
+                message = f"Tu tarea {tarea.titulo} fue calificada. Nota: {grade}."
+            Notificacion.objects.create(usuario=recipient, tarea=tarea, tipo="calificacion" if grade is not None else "comentario", mensaje=message)
+            from core.models import Actividad
+            Actividad.objects.create(usuario=recipient, tarea=tarea, tipo="calificacion" if grade is not None else "comentario", descripcion=message)
     return JsonResponse({"evaluacion": _serializar_evaluacion(evaluacion)}, status=201)
 
 

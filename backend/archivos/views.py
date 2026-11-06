@@ -1,5 +1,6 @@
 import mimetypes
 import re
+import hashlib
 
 from django.contrib.auth.decorators import login_required
 from django.core.exceptions import ValidationError
@@ -57,7 +58,9 @@ def _file_queryset(usuario):
     projects = _authorized_projects(usuario)
     tasks = _authorized_tasks(usuario, projects)
     task_file_access = (
-        Q(tarea__in=tasks, proyecto__isnull=True)
+        Q(tareas_adjuntas__in=tasks)
+        | Q(proyectos_adjuntos__in=projects)
+        | Q(tarea__in=tasks, proyecto__isnull=True)
         | Q(tarea__in=tasks, proyecto_id=F("tarea__proyecto_id"))
     )
     return Archivo.objects.filter(
@@ -91,8 +94,36 @@ def _clean_uploaded_file(uploaded):
 
 
 def _save_uploaded_file(usuario, uploaded, *, carpeta=None, proyecto=None, tarea=None):
+    # Serialize uploads per owner so simultaneous identical uploads cannot pass the hash check together.
+    from django.db import transaction
+    with transaction.atomic():
+        usuario.__class__.objects.select_for_update().get(pk=usuario.pk)
+        return _guardar_archivo(usuario, uploaded, carpeta=carpeta, proyecto=proyecto, tarea=tarea)
+
+
+def _guardar_archivo(usuario, uploaded, *, carpeta=None, proyecto=None, tarea=None):
     _clean_uploaded_file(uploaded)
     original_name = uploaded.name.replace("\\", "/").rsplit("/", 1)[-1]
+    digest = hashlib.sha256()
+    for chunk in uploaded.chunks():
+        digest.update(chunk)
+    uploaded.seek(0)
+    sha256 = digest.hexdigest()
+    candidates = Archivo.objects.filter(propietario=usuario).only("pk", "sha256", "archivo")
+    for existing in candidates:
+        existing_hash = existing.sha256
+        if not existing_hash:
+            try:
+                hasher = hashlib.sha256()
+                with existing.archivo.open("rb") as stored:
+                    for block in iter(lambda: stored.read(1024 * 1024), b""):
+                        hasher.update(block)
+                existing_hash = hasher.hexdigest()
+                Archivo.objects.filter(pk=existing.pk, sha256="").update(sha256=existing_hash)
+            except (OSError, ValueError):
+                continue
+        if existing_hash == sha256:
+            raise ValidationError("Este archivo ya se encuentra en tus archivos.")
     tipo = mimetypes.guess_type(original_name)[0] or "application/octet-stream"
     archivo = Archivo(
         archivo=uploaded,
@@ -100,6 +131,7 @@ def _save_uploaded_file(usuario, uploaded, *, carpeta=None, proyecto=None, tarea
         tamano=uploaded.size,
         tipo=tipo[:100],
         propietario=usuario,
+        sha256=sha256,
         carpeta=carpeta,
         proyecto=proyecto,
         tarea=tarea,
@@ -130,9 +162,21 @@ def api_archivos(request):
         if carpeta_id is not None:
             carpeta = get_object_or_404(Carpeta, pk=carpeta_id, propietario=request.user)
             archivos = archivos.filter(carpeta=carpeta)
+        query = request.GET.get("buscar", "").strip()
+        if query:
+            archivos = archivos.filter(nombre_original__icontains=query)
 
+        visibles = archivos.select_related("carpeta").order_by("-fecha_subida", "-pk")
         return JsonResponse({
-            "archivos": [_serialize_file(archivo) for archivo in archivos.order_by("-fecha_subida", "-pk")]
+            "archivos": [_serialize_file(archivo) for archivo in visibles],
+            "carpeta_por_archivo": {
+                str(item.pk): {"id": item.carpeta_id, "nombre": item.carpeta.nombre}
+                for item in visibles
+                if item.carpeta_id and item.carpeta.propietario_id == request.user.pk
+            },
+            "puede_administrar_por_archivo": {
+                str(item.pk): item.propietario_id == request.user.pk for item in visibles
+            },
         })
 
     uploaded = request.FILES.get("archivo")
@@ -169,7 +213,44 @@ def api_archivos(request):
         message = "; ".join(exc.messages)
         return JsonResponse({"error": message}, status=400)
 
+    from core.models import Actividad
+    Actividad.objects.create(usuario=request.user, descripcion=f"Subiste el archivo {archivo.nombre_original}.", tipo="archivo", archivo=archivo)
+
     return JsonResponse({"archivo": _serialize_file(archivo)}, status=201)
+
+
+@login_required
+@require_http_methods(["POST", "DELETE"])
+def eliminar_archivo(request, pk):
+    if not _has_academic_role(request.user):
+        return JsonResponse({"error": "Tu cuenta no tiene un rol habilitado."}, status=403)
+    if request.method != "DELETE" and request.POST.get("confirmar") != "si":
+        return JsonResponse({"error": "Confirma la eliminación del archivo."}, status=400)
+    archivo = get_object_or_404(Archivo, pk=pk, propietario=request.user)
+    storage, name = archivo.archivo.storage, archivo.archivo.name
+    archivo.delete()
+    if name and storage.exists(name):
+        storage.delete(name)
+    return JsonResponse({"eliminado": True})
+
+
+@login_required
+@require_http_methods(["POST"])
+def mover_archivo(request, pk):
+    if not _has_academic_role(request.user):
+        return JsonResponse({"error": "Tu cuenta no tiene un rol habilitado."}, status=403)
+    archivo = get_object_or_404(Archivo, pk=pk, propietario=request.user)
+    folder_id = request.POST.get("carpeta", "")
+    if folder_id:
+        try:
+            folder_id = _parse_optional_id(folder_id, "carpeta")
+        except ValueError as exc:
+            return JsonResponse({"error": str(exc)}, status=400)
+        archivo.carpeta = get_object_or_404(Carpeta, pk=folder_id, propietario=request.user)
+    else:
+        archivo.carpeta = None
+    archivo.save(update_fields=("carpeta",))
+    return JsonResponse({"movido": True})
 
 
 @login_required
@@ -209,9 +290,10 @@ def descargar_archivo(request, pk):
         raise Http404
 
     nombre = archivo.nombre_original or "archivo"
+    inline = request.GET.get("inline") == "1" and (archivo.tipo == "application/pdf" or (archivo.tipo or "").startswith("image/"))
     response = FileResponse(
         stream,
-        as_attachment=True,
+        as_attachment=not inline,
         filename=nombre,
         content_type=archivo.tipo or "application/octet-stream",
     )

@@ -1592,6 +1592,7 @@ nav {
                     priority: task.prioridad,
                     grade: task.calificacion,
                     feedback: task.retroalimentacion,
+                    attachments: task.archivos_adjuntos || [],
                     deliveries: [],
                     groupEvaluation: null,
                     individualEvaluations: []
@@ -1921,6 +1922,16 @@ nav {
                 var deliveryBox = el('div', 'project-task-deliveries');
                 deliveryBox.appendChild(el('strong', null, 'Entrega grupal'));
                 deliveryBox.appendChild(el('p', 'muted', 'Integrantes: ' + (p.members.join(', ') || 'Sin integrantes')));
+                if (t.attachments && t.attachments.length) {
+                    deliveryBox.appendChild(el('strong', null, 'Archivos adjuntos del alumno'));
+                    t.attachments.forEach(function (file) {
+                        var openAttachment = el('a', 'text-button', 'Abrir ' + file.nombre);
+                        openAttachment.href = file.abrir;
+                        openAttachment.target = '_blank';
+                        openAttachment.rel = 'noopener noreferrer';
+                        deliveryBox.appendChild(openAttachment);
+                    });
+                }
                 if (!t.deliveries.length) {
                     deliveryBox.appendChild(el('p', 'muted', 'El grupo todavía no entregó.'));
                 } else {

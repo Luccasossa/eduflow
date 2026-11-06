@@ -17,6 +17,8 @@
     let editingProject = null;
     let academicFiles = [];
     let folders = [];
+    let fileFolders = {};
+    let fileManagement = {};
     let academicDocuments = [];
     let editingDocument = null;
     let documentConflictPending = false;
@@ -96,8 +98,12 @@
         const params = new URLSearchParams();
         if ($("#fileProjectFilter")?.value) params.set("proyecto", $("#fileProjectFilter").value);
         if ($("#fileFolderFilter")?.value) params.set("carpeta", $("#fileFolderFilter").value);
+        if ($("#fileSearchInput")?.value.trim()) params.set("buscar", $("#fileSearchInput").value.trim());
         try {
-            academicFiles = (await api(`/archivos/api/${params.size ? `?${params}` : ""}`)).archivos;
+            const result = await api(`/archivos/api/${params.size ? `?${params}` : ""}`);
+            academicFiles = result.archivos;
+            fileFolders = result.carpeta_por_archivo || {};
+            fileManagement = result.puede_administrar_por_archivo || {};
             renderFiles();
         } catch (error) { notify(error.message, true); }
     }
@@ -117,12 +123,135 @@
             card.appendChild(make("span", "", `${formatBytes(file.tamano)} · ${dateLabel(file.fecha_subida.slice(0, 10))}`));
             if (file.proyecto_id) card.appendChild(make("span", "", `Proyecto: ${projects.find((p) => p.id === file.proyecto_id)?.nombre || "Compartido"}`));
             const link = make("a", "text-button", "Descargar");
-            link.href = file.descarga;
-            link.setAttribute("aria-label", `Descargar ${file.nombre}`);
+            link.href = `${file.descarga}?inline=1`;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.setAttribute("aria-label", `Abrir ${file.nombre} en una pestaña nueva`);
             card.appendChild(link);
+            const folder = fileFolders[String(file.id)];
+            if (folder?.nombre) card.appendChild(make("span", "", `Carpeta: ${folder.nombre}`));
+            if (fileManagement[String(file.id)]) {
+            const moveTo = document.createElement("select");
+            moveTo.setAttribute("aria-label", `Mover ${file.nombre} a una carpeta`);
+            moveTo.add(new Option("Sin carpeta", ""));
+            folders.forEach((item) => moveTo.add(new Option(item.nombre, item.id)));
+            moveTo.value = folder?.id ? String(folder.id) : "";
+            const move = make("button", "text-button", "Mover");
+            move.type = "button";
+            move.addEventListener("click", async () => {
+                const body = new FormData(); body.append("carpeta", moveTo.value);
+                try {
+                    const response = await fetch(`/archivos/api/${file.id}/carpeta/`, { method: "POST", headers: { "X-CSRFToken": csrf, Accept: "application/json" }, body });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || "No se pudo mover el archivo.");
+                    notify("Archivo movido correctamente."); await loadFiles();
+                } catch (error) { notify(error.message, true); }
+            });
+            card.append(moveTo, move);
+            const remove = make("button", "text-button danger-text", "Eliminar");
+            remove.type = "button";
+            remove.addEventListener("click", async () => {
+                if (!window.confirm(`¿Eliminar ${file.nombre}?`)) return;
+                try {
+                    const response = await fetch(`/archivos/api/${file.id}/eliminar/`, { method: "DELETE", headers: { "X-CSRFToken": csrf, Accept: "application/json" } });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || "No se pudo eliminar el archivo.");
+                    notify("Archivo eliminado correctamente."); await loadFiles();
+                } catch (error) { notify(error.message, true); }
+            });
+            card.appendChild(remove);
+            }
             list.appendChild(card);
         });
         $("#storageUsage")?.replaceChildren(document.createTextNode(`${formatBytes(used)} en esta vista`));
+    }
+
+    async function attachExisting(endpoint) {
+        try {
+            const available = await api("/archivos/api/");
+            const files = available.archivos.filter((file) => available.puede_administrar_por_archivo?.[String(file.id)]);
+            if (!files.length) { notify("Primero sube archivos a tu biblioteca.", true); return; }
+            const choice = window.prompt(`Escribe uno o varios números separados por coma para adjuntar:\n${files.map((file, i) => `${i + 1}. ${file.nombre}`).join("\n")}`);
+            if (choice === null) return;
+            const selected = choice.split(",").map((item) => Number(item.trim()) - 1);
+            if (!selected.length || selected.some((index) => !files[index])) { notify("Selecciona números válidos.", true); return; }
+            const unique = [...new Set(selected)].map((index) => files[index]);
+            if (!window.confirm(`Adjuntar ${unique.length} archivo(s) seleccionado(s)?`)) return;
+            for (const file of unique) await api(endpoint, "POST", { archivo_id: file.id });
+            notify(unique.length === 1 ? "Archivo adjuntado correctamente." : "Archivos adjuntados correctamente.");
+            await Promise.all([loadTasks(), loadProjects()]);
+            loadActivity();
+        } catch (error) { notify(error.message, true); }
+    }
+
+    function appendAttachments(container, files = [], endpoint = "") {
+        files.forEach((file) => {
+            const link = make("a", "text-button", `Abrir ${file.nombre}`);
+            link.href = file.abrir;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            container.appendChild(link);
+            if (endpoint && file.puede_quitar) {
+                const remove = make("button", "text-button danger-text", "Quitar");
+                remove.type = "button";
+                remove.addEventListener("click", async () => {
+                    try { await api(endpoint, "DELETE", { archivo_id: file.id }); notify("Adjunto quitado."); await Promise.all([loadTasks(), loadProjects()]); }
+                    catch (error) { notify(error.message, true); }
+                });
+                container.appendChild(remove);
+            }
+        });
+    }
+
+    async function loadActivity() {
+        const list = $("#recentActivityList");
+        if (!list) return;
+        try {
+            const rows = (await api("/api/actividad/")).actividades;
+            list.replaceChildren();
+            if (!rows.length) { list.appendChild(make("p", "empty-state", "Todavía no hay actividad.")); return; }
+            rows.forEach((row) => {
+                const item = make("div", "activity");
+                item.appendChild(make("div", "activity-icon", "•"));
+                const info = make("div");
+                info.appendChild(make("strong", "", row.descripcion));
+                info.appendChild(make("small", "", `${row.tipo} · ${new Date(row.fecha).toLocaleString("es-AR")}`));
+                if (row.tarea_id) {
+                    const openTaskLink = make("button", "text-button", "Ver tarea");
+                    openTaskLink.type = "button";
+                    openTaskLink.addEventListener("click", () => openTaskInDashboard(row.tarea_id));
+                    info.appendChild(openTaskLink);
+                } else if (row.archivo_id) {
+                    const openFile = make("a", "text-button", "Abrir archivo");
+                    openFile.href = `/archivos/api/${row.archivo_id}/descargar/?inline=1`;
+                    openFile.target = "_blank";
+                    openFile.rel = "noopener noreferrer";
+                    info.appendChild(openFile);
+                } else if (row.proyecto_id) {
+                    info.appendChild(make("small", "", `Proyecto #${row.proyecto_id}`));
+                }
+                item.appendChild(info); list.appendChild(item);
+            });
+        } catch (error) { notify(error.message, true); }
+    }
+
+    async function loadNotifications(show = false) {
+        try {
+            const result = await api("/api/notificaciones/");
+            const dot = $("#notificationBtn .notification-dot");
+            if (dot) dot.hidden = result.no_leidas === 0;
+            if (!show) return;
+            const unread = result.notificaciones.filter((item) => !item.leida);
+            if (!unread.length) { notify("No tienes notificaciones nuevas."); return; }
+            const selected = window.prompt(`Notificaciones nuevas:\n${unread.map((item, i) => `${i + 1}. ${item.mensaje}`).join("\n")}\n\nEscribe un número para abrir la tarea relacionada.`);
+            await api("/api/notificaciones/", "PATCH", { ids: unread.map((item) => item.id) });
+            if (dot) dot.hidden = true;
+            const notification = unread[Number(selected) - 1];
+            const taskId = notification?.url.match(/\/tareas\/api\/(\d+)\//)?.[1];
+            if (taskId) {
+                openTaskInDashboard(taskId);
+            }
+        } catch (error) { notify(error.message, true); }
     }
 
     async function loadDocuments() {
@@ -295,6 +424,13 @@
         return value ? new Date(`${value}T12:00:00`).toLocaleDateString("es-AR") : "Sin fecha de entrega";
     }
 
+    function openTaskInDashboard(taskId) {
+        const projectTask = projects.some((project) => project.tareas.some((task) => task.id === Number(taskId)));
+        const section = projectTask ? "proyectos" : "tareas";
+        document.querySelector(`.nav-item[data-section="${section}"]`)?.click();
+        window.setTimeout(() => document.getElementById(`task-${taskId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
+    }
+
     // Navegación del dashboard existente.
     const navItems = $$('.nav-item[data-section]');
     navItems.forEach((item) => item.addEventListener("click", (event) => {
@@ -340,6 +476,7 @@
             if (!tasks.length) column.appendChild(make("p", "empty-state", "No hay tareas en este estado."));
             tasks.forEach((task) => {
                 const card = make("article", `kanban-card${state === "completada" ? " completed" : ""}`);
+                card.id = `task-${task.id}`;
                 card.appendChild(make("strong", "", task.titulo));
                 if (task.descripcion) card.appendChild(make("p", "", task.descripcion));
                 card.appendChild(make("span", "card-date", `${dateLabel(task.fecha_vencimiento)} · Prioridad ${task.prioridad}`));
@@ -361,6 +498,11 @@
                 remove.type = "button";
                 remove.addEventListener("click", () => deleteTask(task));
                 actions.append(stateSelect, edit, remove);
+                const attach = make("button", "text-button", "Adjuntar archivos");
+                attach.type = "button";
+                attach.addEventListener("click", () => attachExisting(`${taskUrl}${task.id}/archivos/`));
+                actions.appendChild(attach);
+                appendAttachments(card, task.archivos_adjuntos, `${taskUrl}${task.id}/archivos/`);
                 card.appendChild(actions);
                 column.appendChild(card);
             });
@@ -387,7 +529,6 @@
         }
         upcoming.forEach((task) => {
             const row = make("div", "task");
-            row.appendChild(make("div", "task-check", task.estado === "completada" ? "✓" : ""));
             const info = make("div", "task-info");
             info.appendChild(make("strong", "", task.titulo));
             info.appendChild(make("span", "", dateLabel(task.fecha_vencimiento)));
@@ -426,12 +567,22 @@
         $("#taskDescription").value = task?.descripcion || "";
         $("#taskDueDate").value = task?.fecha_vencimiento || "";
         $("#priorityInput").value = task?.prioridad || "media";
+        $("#priorityInput").disabled = true;
         $("#taskStateInput").value = task?.estado || "pendiente";
         $("#taskFormError").textContent = "";
         $("#deleteTaskBtn").hidden = !task;
         taskModal.classList.add("show");
         $("#taskInput").focus();
     }
+
+    $("#taskDueDate")?.addEventListener("change", () => {
+        const value = $("#taskDueDate").value;
+        if (!value) { $("#priorityInput").value = "media"; return; }
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const due = new Date(`${value}T00:00:00`);
+        const days = Math.floor((due - today) / 86400000);
+        $("#priorityInput").value = days > 20 ? "baja" : days >= 5 ? "media" : "alta";
+    });
 
     async function saveTask() {
         const data = {
@@ -449,6 +600,7 @@
             closeTaskModal();
             await Promise.all([loadTasks(), loadProjects()]);
             notify(editingTask ? "Tarea actualizada." : "Tarea creada.");
+            loadActivity();
         } catch (error) { $("#taskFormError").textContent = error.message; }
     }
 
@@ -458,6 +610,7 @@
             await api(`${taskUrl}${task.id}/`, "DELETE", {});
             await Promise.all([loadTasks(), loadProjects()]);
             notify("Tarea eliminada.");
+            loadActivity();
         } catch (error) { notify(error.message, true); }
     }
 
@@ -486,19 +639,27 @@
             addTask.type = "button";
             addTask.addEventListener("click", () => openTask(null, project.id));
             actions.appendChild(addTask);
-            if (project.puede_editar) {
+            if (project.puede_adjuntar) {
                 const edit = make("button", "text-button", "Editar proyecto");
                 edit.type = "button";
                 edit.addEventListener("click", () => openProject(project));
                 actions.appendChild(edit);
             }
             card.appendChild(actions);
+            appendAttachments(card, project.archivos_adjuntos, project.puede_adjuntar ? `${projectUrl}${project.id}/archivos/` : "");
+            if (project.puede_editar) {
+                const attachProject = make("button", "text-button", "Adjuntar archivos al proyecto");
+                attachProject.type = "button";
+                attachProject.addEventListener("click", () => attachExisting(`${projectUrl}${project.id}/archivos/`));
+                card.appendChild(attachProject);
+            }
 
             const taskList = make("div", "project-task-list");
             taskList.appendChild(make("h4", "", "Tareas del equipo"));
             if (!project.tareas.length) taskList.appendChild(make("p", "empty-state", "Todavía no hay tareas."));
             project.tareas.forEach((task) => {
                 const row = make("div", "project-task-row");
+                row.id = `task-${task.id}`;
                 const details = make("div");
                 details.appendChild(make("strong", "", task.titulo));
                 details.appendChild(make("small", "", `${states.find(([value]) => value === task.estado)?.[1] || task.estado} · ${task.prioridad} · ${dateLabel(task.fecha_vencimiento)}`));
@@ -506,6 +667,10 @@
 
                 const deliveryPanel = make("div", "group-delivery-panel");
                 deliveryPanel.appendChild(make("strong", "", "Entrega grupal"));
+                if (task.archivos_adjuntos?.length) {
+                    deliveryPanel.appendChild(make("strong", "", "Archivos adjuntos del alumno"));
+                    appendAttachments(deliveryPanel, task.archivos_adjuntos, `${taskUrl}${task.id}/archivos/`);
+                }
                 if (task.entregas?.length) {
                     task.entregas.forEach((delivery) => {
                         const info = make("p", "", `Entrega #${delivery.id} · ${delivery.alumno} · ${dateLabel(delivery.fecha_entrega.slice(0, 10))} · ${delivery.estado}`);
@@ -651,6 +816,7 @@
             closeProjectModal();
             await loadProjects();
             notify(editingProject ? "Proyecto actualizado." : "Proyecto creado.");
+            loadActivity();
         } catch (error) { $("#projectFormError").textContent = error.message; }
     }
 
@@ -681,7 +847,7 @@
         ["#filterTaskStatus", "#filterTaskPriority", "#filterTaskFrom", "#filterTaskTo"].forEach((selector) => { if ($(selector)) $(selector).value = ""; });
         loadTasks();
     });
-    $("#notificationBtn")?.addEventListener("click", () => notify("No tienes notificaciones nuevas."));
+    $("#notificationBtn")?.addEventListener("click", () => loadNotifications(true));
 
     $("#uploadFileBtn")?.addEventListener("click", () => $("#academicFileInput")?.click());
     $("#academicFileInput")?.addEventListener("change", async (event) => {
@@ -697,6 +863,7 @@
             if (!response.ok) throw new Error(result.error || "No se pudo subir el archivo.");
             notify("Archivo subido.");
             await loadFiles();
+            loadActivity();
         } catch (error) { notify(error.message, true); }
         event.target.value = "";
     });
@@ -706,6 +873,8 @@
         loadFiles();
     });
     $("#fileFolderFilter")?.addEventListener("change", loadFiles);
+    let fileSearchTimer;
+    $("#fileSearchInput")?.addEventListener("input", () => { clearTimeout(fileSearchTimer); fileSearchTimer = setTimeout(loadFiles, 180); });
     $("#newFolderBtn")?.addEventListener("click", async () => {
         const nombre = window.prompt("Nombre de la carpeta:")?.trim();
         if (!nombre) return;
@@ -718,6 +887,7 @@
             await loadFolders();
             $("#fileFolderFilter").value = String(result.carpeta.id);
             await loadFiles();
+            notify("Carpeta creada correctamente.");
         } catch (error) { notify(error.message, true); }
     });
     $("#newDocumentBtn")?.addEventListener("click", () => openDocument());
@@ -737,6 +907,8 @@
         });
         loadFiles();
     });
-    loadFolders().catch((error) => notify(error.message, true));
+    loadFolders().then(loadFiles).catch((error) => notify(error.message, true));
     loadDocuments();
+    loadActivity();
+    loadNotifications();
 })();

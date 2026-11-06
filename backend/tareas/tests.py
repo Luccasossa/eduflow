@@ -1,5 +1,6 @@
 import json
 import tempfile
+from datetime import timedelta
 from concurrent.futures import ThreadPoolExecutor
 from threading import Barrier
 
@@ -8,6 +9,7 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.db import close_old_connections
 from django.test import Client, TestCase, TransactionTestCase, override_settings, skipUnlessDBFeature
 from django.urls import reverse
+from django.utils import timezone
 
 from proyectos.models import Proyecto
 from usuarios.models import PerfilUsuario
@@ -71,11 +73,45 @@ class TablerosTests(TestCase):
         tarea.refresh_from_db()
         self.assertEqual(tarea.titulo, "Actualizada")
         self.assertEqual(tarea.estado, "en_progreso")
-        self.assertEqual(tarea.prioridad, "baja")
+        expected = "baja" if (tarea.fecha_vencimiento - timezone.localdate()).days > 20 else "media" if (tarea.fecha_vencimiento - timezone.localdate()).days >= 5 else "alta"
+        self.assertEqual(tarea.prioridad, expected)
         self.assertEqual(tarea.fecha_vencimiento.isoformat(), "2026-11-05")
-        response = self.client.get(reverse("api_tareas") + "?estado=en_progreso&prioridad=baja&desde=2026-11-01&hasta=2026-11-30")
+        response = self.client.get(reverse("api_tareas") + f"?estado=en_progreso&prioridad={expected}&desde=2026-11-01&hasta=2026-11-30")
         self.assertEqual(response.status_code, 200)
         self.assertEqual([item["id"] for item in response.json()["tareas"]], [tarea.id])
+
+    def test_prioridad_automatica_en_los_limites_requeridos(self):
+        self.client.force_login(self.alumno)
+        today = timezone.localdate()
+        for days, expected in ((25, "baja"), (20, "media"), (10, "media"), (5, "media"), (4, "alta"), (1, "alta"), (-1, "alta")):
+            response = self.json_post(reverse("api_tareas"), {
+                "titulo": f"Vencimiento {days}",
+                "fecha_vencimiento": (today + timedelta(days=days)).isoformat(),
+                "prioridad": "baja",
+            })
+            self.assertEqual(response.status_code, 201, response.content)
+            self.assertEqual(response.json()["tarea"]["prioridad"], expected, f"{days} días")
+
+    def test_devolucion_crea_notificacion_persistente_sin_duplicar_reintentos(self):
+        from core.models import Notificacion
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe final")
+        url = reverse("api_evaluacion_individual", args=[tarea.pk, self.alumno.pk])
+        self.client.force_login(self.profesor)
+        payload = json.dumps({"calificacion": "9.00", "comentario": "Muy buen trabajo."})
+        first = self.client.post(url, data=payload, content_type="application/json")
+        retry = self.client.post(url, data=payload, content_type="application/json")
+        self.assertEqual(first.status_code, 201)
+        self.assertEqual(retry.status_code, 200)
+        self.assertTrue(retry.json()["sin_cambios"])
+        notice = Notificacion.objects.get(usuario=self.alumno, tarea=tarea)
+        self.assertEqual(notice.tipo, "calificacion")
+        self.assertIn("Nota: 9.00", notice.mensaje)
+        self.client.force_login(self.alumno)
+        response = self.client.get(reverse("core:api_notificaciones"))
+        self.assertEqual(response.json()["no_leidas"], 1)
+        self.assertEqual(response.json()["notificaciones"][0]["url"], f"/tareas/api/{tarea.pk}/")
 
     def test_elimina_tarea_propia(self):
         tarea = Tarea.objects.create(creador=self.alumno, titulo="Eliminar")
@@ -216,12 +252,13 @@ class TablerosTests(TestCase):
         self.client.force_login(self.profesor)
         self.assertEqual(self.client.patch(reverse("api_tarea", args=[tarea.id]), data=json.dumps({"estado": "completada"}), content_type="application/json").status_code, 403)
 
-    def test_rechaza_fechas_y_prioridades_invalidas(self):
+    def test_rechaza_fechas_invalidas_e_ignora_prioridad_manual(self):
         self.client.force_login(self.alumno)
         response = self.json_post(reverse("api_tareas"), {"titulo": "Fecha", "fecha_vencimiento": "ayer"})
         self.assertEqual(response.status_code, 400)
         response = self.json_post(reverse("api_tareas"), {"titulo": "Prioridad", "prioridad": "urgente"})
-        self.assertEqual(response.status_code, 400)
+        self.assertEqual(response.status_code, 201)
+        self.assertEqual(response.json()["tarea"]["prioridad"], "media")
 
     def test_entrega_valida_se_lista_solo_al_alumno_y_docente_asignado(self):
         proyecto = self.crear_proyecto()

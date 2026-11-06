@@ -31,6 +31,7 @@ class Proyecto(models.Model):
     fecha_entrega = models.DateField(blank=True, null=True)
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     fecha_actualizacion = models.DateTimeField(auto_now=True)
+    archivos_adjuntos = models.ManyToManyField("archivos.Archivo", blank=True, related_name="proyectos_adjuntos")
 
     def __str__(self):
         return self.nombre

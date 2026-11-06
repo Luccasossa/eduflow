@@ -54,6 +54,8 @@ def _proyecto_visible(request, pk):
 
 def _serializar_proyecto(proyecto, usuario=None):
     tareas = list(proyecto.tareas.all().order_by("fecha_vencimiento", "id"))
+    from tareas.prioridad import sincronizar_prioridades
+    sincronizar_prioridades(tareas)
     integrantes = list(proyecto.integrantes.all())
     if not any(miembro.pk == proyecto.creador_id for miembro in integrantes):
         integrantes.append(proyecto.creador)
@@ -69,6 +71,7 @@ def _serializar_proyecto(proyecto, usuario=None):
         "progreso": progreso,
         "creador_id": proyecto.creador_id,
         "puede_editar": bool(usuario and _rol(usuario) == "alumno" and proyecto.creador_id == usuario.id),
+        "puede_adjuntar": bool(usuario and _rol(usuario) == "alumno" and alumno_integrante(usuario, proyecto)),
         "integrantes": [
             {"id": miembro.id, "nombre": miembro.get_full_name() or miembro.dni}
             for miembro in integrantes
@@ -85,12 +88,20 @@ def _serializar_proyecto(proyecto, usuario=None):
                 "creador": tarea.creador.get_full_name() or tarea.creador.dni,
                 "calificacion": str(tarea.calificacion) if tarea.calificacion is not None else "",
                 "retroalimentacion": tarea.retroalimentacion,
+                "archivos_adjuntos": [
+                    {"id": f.pk, "nombre": f.nombre_original, "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
+                    for f in tarea.archivos_adjuntos.all()
+                ],
             }
             for tarea in tareas
         ],
         "devoluciones": [
             _serializar_devolucion(d)
             for d in _devoluciones_visibles(proyecto, usuario)
+        ],
+        "archivos_adjuntos": [
+            {"id": f.pk, "nombre": f.nombre_original, "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
+            for f in proyecto.archivos_adjuntos.all()
         ],
     }
 
@@ -185,6 +196,8 @@ def api_proyectos(request):
             creador=request.user,
         )
         proyecto.integrantes.add(request.user, *miembros)
+        from core.models import Actividad
+        Actividad.objects.create(usuario=request.user, descripcion=f"Creaste el proyecto {proyecto.nombre}.", tipo="proyecto", proyecto=proyecto)
     return JsonResponse({"proyecto": _serializar_proyecto(proyecto, request.user)}, status=201)
 
 
@@ -273,6 +286,30 @@ def api_devoluciones(request, pk):
     except (ValueError, TypeError, InvalidOperation, ValidationError):
         return JsonResponse({"error": f"La calificación debe estar entre 0 y {getattr(settings, 'EDUFLOW_GRADE_MAX', 10)} y la devolución debe incluir comentario o nota."}, status=400)
     return JsonResponse({"devolucion": _serializar_devolucion(entry)}, status=201)
+
+
+@login_required
+@require_http_methods(["GET", "POST", "DELETE"])
+def api_archivos_proyecto(request, pk):
+    from archivos.models import Archivo
+    proyecto = _proyecto_visible(request, pk)
+    if request.method == "GET":
+        return JsonResponse({"archivos": _serializar_proyecto(proyecto, request.user)["archivos_adjuntos"]})
+    if _rol(request.user) != "alumno" or not alumno_integrante(request.user, proyecto):
+        return JsonResponse({"error": "Solo un integrante del proyecto puede gestionar adjuntos."}, status=403)
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "Solicitud no válida."}, status=400)
+    archivo = get_object_or_404(Archivo, pk=data.get("archivo_id"), propietario=request.user)
+    if request.method == "POST":
+        already_attached = proyecto.archivos_adjuntos.filter(pk=archivo.pk).exists()
+        proyecto.archivos_adjuntos.add(archivo)
+        if not already_attached:
+            from core.models import Actividad
+            Actividad.objects.create(usuario=request.user, descripcion=f"Adjuntaste {archivo.nombre_original} al proyecto {proyecto.nombre}.", tipo="adjunto", proyecto=proyecto, archivo=archivo)
+        return JsonResponse({"adjuntado": True})
+    proyecto.archivos_adjuntos.remove(archivo)
+    return JsonResponse({"quitado": True})
 
 
 @login_required

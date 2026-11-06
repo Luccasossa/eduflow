@@ -7,4 +7,5 @@ urlpatterns = [
     path('api/', views.api_proyectos, name='api_proyectos'),
     path('api/<int:pk>/', views.api_proyecto, name='api_proyecto'),
     path('api/<int:pk>/devoluciones/', views.api_devoluciones, name='api_devoluciones'),
+    path('api/<int:pk>/archivos/', views.api_archivos_proyecto, name='api_archivos_proyecto'),
 ]
