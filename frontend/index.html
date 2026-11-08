@@ -411,6 +411,10 @@
         <div class="project-task-board-actions"><button type="button" class="secondary-button" id="backFromProjectTasks">Volver a proyectos</button><button type="button" class="primary-button" id="newProjectBoardTask">+ Nueva tarea</button></div>
         <div class="kanban project-task-board" id="projectTaskBoard" aria-live="polite"></div>
     </dialog>
+    <dialog class="modal" id="detailModal" aria-labelledby="detailTitle">
+        <div class="modal-header"><h2 id="detailTitle">Detalle</h2><button type="button" class="close-modal" id="closeDetailModal" aria-label="Cerrar">×</button></div>
+        <div id="detailContent"></div>
+    </dialog>
     <dialog class="modal project-documents-modal" id="projectDocumentsModal" aria-labelledby="projectDocumentsTitle">
         <div class="modal-header">
             <h2 id="projectDocumentsTitle">Documentos del proyecto</h2>

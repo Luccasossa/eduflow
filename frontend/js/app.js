@@ -712,6 +712,58 @@
             container.appendChild(row);
         });
     }
+    async function showTaskDetail(task) {
+        const dialog = $("#detailModal"), content = $("#detailContent");
+        $("#detailTitle").textContent = "Tarea · " + task.titulo;
+        content.replaceChildren(make("p", "muted", "Cargando información…"));
+        dialog.showModal();
+        try {
+            const detail = (await api(`${taskUrl}${task.id}/`)).tarea;
+            const deliveryResult = await api(`${taskUrl}${task.id}/entregas/`);
+            const body = make("div", "detail-view");
+            [["Descripción", detail.descripcion || "Sin descripción."], ["Estado", states.find(([value]) => value === detail.estado)?.[1] || detail.estado], ["Creada", dateLabel((detail.fecha_creacion || "").slice(0, 10))], ["Fecha de entrega", dateLabel(detail.fecha_vencimiento)]].forEach(([label, value]) => {
+                body.append(make("h3", "", label), make("p", "", value));
+            });
+            body.appendChild(make("h3", "", "Archivos adjuntos"));
+            const files = make("div", "detail-files"); renderTaskAttachments(files, detail);
+            if (!files.childElementCount) files.appendChild(make("p", "empty-state", "No hay archivos adjuntos."));
+            body.appendChild(files);
+            body.appendChild(make("h3", "", "Entrega del alumno"));
+            if (deliveryResult.entregas.length) deliveryResult.entregas.forEach((delivery) => {
+                body.appendChild(make("p", "", `${delivery.estado} · Entregada: ${new Date(delivery.fecha_entrega).toLocaleString("es-AR")}${delivery.observaciones ? ` · ${delivery.observaciones}` : ""}`));
+                const link = make("a", "text-button", `Descargar ${delivery.nombre}`); link.href = delivery.descarga; body.appendChild(link);
+                if (/\.(pdf|png|jpe?g)$/i.test(delivery.nombre)) { const open = make("a", "text-button", "Abrir entrega"); open.href = delivery.descarga + "?inline=1"; open.target = "_blank"; open.rel = "noopener noreferrer"; body.appendChild(open); }
+            }); else body.appendChild(make("p", "empty-state", "No hay una entrega registrada."));
+            body.appendChild(make("h3", "", "Retroalimentación docente"));
+            const feedback = [...(detail.devoluciones || [])].filter((entry) => !entry.anulada);
+            if (feedback.length) feedback.forEach((entry) => {
+                const item = make("article", "project-feedback-entry");
+                item.appendChild(make("strong", "", `${entry.autor} · ${dateLabel((entry.fecha || "").slice(0, 10))}`));
+                if (entry.calificacion) item.appendChild(make("p", "", `Calificación: ${entry.calificacion}`));
+                if (entry.comentario) item.appendChild(make("p", "", entry.comentario));
+                body.appendChild(item);
+            }); else body.appendChild(make("p", "empty-state", "Todavía no hay devoluciones."));
+            content.replaceChildren(body);
+        } catch (error) { content.replaceChildren(make("p", "form-error", error.message)); }
+    }
+    function showProjectDetail(project) {
+        const dialog = $("#detailModal"), content = $("#detailContent"), body = make("div", "detail-view");
+        $("#detailTitle").textContent = "Proyecto · " + project.nombre;
+        body.append(make("h3", "", "Descripción"), make("p", "", project.descripcion || "Sin descripción."), make("p", "", `Fecha de entrega: ${dateLabel(project.fecha_entrega)} · Progreso: ${project.progreso}%`));
+        body.appendChild(make("h3", "", "Tareas del proyecto"));
+        if (!project.tareas.length) body.appendChild(make("p", "empty-state", "Este proyecto todavía no tiene tareas."));
+        project.tareas.forEach((task) => {
+            const row = make("article", "project-feedback-entry");
+            row.append(make("strong", "", task.titulo), make("p", "", `${states.find(([value]) => value === task.estado)?.[1] || task.estado} · Entrega: ${dateLabel(task.fecha_vencimiento)}`));
+            const button = make("button", "text-button", "Ver tarea"); button.type = "button"; button.addEventListener("click", () => showTaskDetail(task)); row.appendChild(button);
+            (task.archivos_adjuntos || []).forEach((file) => { const link = make("a", "text-button", `Archivo: ${file.nombre}`); link.href = file.abrir; link.target = "_blank"; link.rel = "noopener noreferrer"; row.appendChild(link); });
+            body.appendChild(row);
+        });
+        body.appendChild(make("h3", "", "Archivos generales del proyecto"));
+        if (project.archivos_adjuntos?.length) project.archivos_adjuntos.forEach((file) => { const link = make("a", "text-button", file.nombre); link.href = file.abrir; link.target = "_blank"; link.rel = "noopener noreferrer"; body.appendChild(link); });
+        else body.appendChild(make("p", "empty-state", "No hay archivos generales."));
+        content.replaceChildren(body); dialog.showModal();
+    }
     function setProjectModalBusy(busy) {
         ["#projectNameInput", "#projectDescriptionInput", "#projectDueDateInput", "#projectMembersInput", "#saveProjectBtn", "#deleteProjectBtn"]
             .forEach((selector) => { const control = $(selector); if (control) control.disabled = busy; });
@@ -736,6 +788,7 @@
                 const priority = calculatedPriority(task.fecha_vencimiento);
                 card.appendChild(make("span", `card-date priority ${priority.key}`, `${dateLabel(task.fecha_vencimiento)} · Prioridad ${priority.label}`));
                 const actions = make("div", "task-card-actions");
+                const view = make("button", "text-button", "Ver tarea"); view.type = "button"; view.addEventListener("click", () => showTaskDetail(task));
                 const stateSelect = document.createElement("select");
                 stateSelect.setAttribute("aria-label", `Estado de ${task.titulo}`);
                 states.forEach(([value, text]) => {
@@ -752,7 +805,7 @@
                 const remove = make("button", "text-button danger-text", "Eliminar");
                 remove.type = "button";
                 remove.addEventListener("click", () => deleteTask(task));
-                actions.append(stateSelect, edit, remove);
+                actions.append(view, stateSelect, edit, remove);
                 renderTaskAttachments(card, task);
                 card.appendChild(actions);
                 column.appendChild(card);
@@ -919,6 +972,7 @@
 
             card.appendChild(make("span", "project-work-type", project.integrantes.length > 1 ? "Trabajo grupal" : "Trabajo individual"));
             const actions = make("div", "project-actions");
+            const viewProject = make("button", "secondary-button", "Ver proyecto"); viewProject.type = "button"; viewProject.addEventListener("click", () => showProjectDetail(project)); actions.appendChild(viewProject);
             const addTask = make("button", "secondary-button", "Tareas");
             addTask.type = "button";
             addTask.addEventListener("click", () => openProjectTaskBoard(project));
@@ -1151,7 +1205,8 @@
                     $("#projectTaskBoardModal").close();
                     openTask(task, project.id);
                 });
-                card.append(stateSelect, edit);
+                const view = make("button", "text-button", "Ver tarea"); view.type = "button"; view.addEventListener("click", () => showTaskDetail(task));
+                card.append(view, stateSelect, edit);
                 renderTaskAttachments(card, task);
                 column.appendChild(card);
             });
@@ -1236,6 +1291,7 @@
     });
 
     $("#closeProjectTaskBoard")?.addEventListener("click", () => $("#projectTaskBoardModal")?.close());
+    $("#closeDetailModal")?.addEventListener("click", () => $("#detailModal")?.close());
     $("#backFromProjectTasks")?.addEventListener("click", () => $("#projectTaskBoardModal")?.close());
     $("#projectTaskBoardModal")?.addEventListener("close", () => {
         if (returningFromProjectTaskBoard) {
