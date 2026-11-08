@@ -7,11 +7,12 @@
 
     <title>EduFlow - Plataforma Académica</title>
 
-    {% load static %}
+{% load static tz %}
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
 </head>
 
-<body data-grade-max="{{ calificacion_maxima }}">
+{% get_current_timezone as EDUFLOW_TIMEZONE %}
+<body data-grade-max="{{ calificacion_maxima }}" data-timezone="{{ EDUFLOW_TIMEZONE }}">
 
     <!-- BARRA LATERAL -->
 
@@ -55,25 +56,6 @@
         </nav>
 
 <div class="sidebar-bottom">
-
-    <!-- CONFIGURACIÓN -->
-
-    <div class="sidebar-option" id="settingsBtn">
-
-        <div class="sidebar-option-icon settings-icon">
-            ⚙️
-        </div>
-
-        <div class="sidebar-option-text">
-            <strong>Configuración</strong>
-            <span>Personalizá tu experiencia</span>
-        </div>
-
-        <div class="sidebar-option-arrow">
-            →
-        </div>
-
-    </div>
 
     <!-- MODO OSCURO -->
 
@@ -127,19 +109,14 @@
 
             <div class="header-right">
 
-                <button class="icon-button" id="notificationBtn">
-                    🔔
-                    <span class="notification-dot"></span>
-                </button>
-
                 <button class="theme-button" id="themeBtn">
                     🌙
                 </button>
 
-                <div class="profile">
+                <button class="profile profile-trigger" id="profileBtn" type="button" aria-haspopup="dialog" aria-controls="profileModal">
 
                     <div class="avatar">
-                        {{ user.first_name|default:user.dni|slice:":2" }}
+                        {{ user.first_name|default:user.dni|slice:":1" }}{{ user.last_name|default:""|slice:":1" }}
                     </div>
 
                     <div>
@@ -147,7 +124,7 @@
                         <small>Alumno</small>
                     </div>
 
-                </div>
+                </button>
 
             </div>
 
@@ -287,79 +264,13 @@
                     <div class="panel-header">
 
                         <div>
-                            <h3>Actividad reciente</h3>
-                            <p>Últimos cambios</p>
+                            <h3>Documentos recientes</h3>
+                            <p>Últimos documentos actualizados</p>
                         </div>
 
                     </div>
-
-
-                    <div class="activity">
-
-                        <div class="activity-icon">
-                            📝
-                        </div>
-
-                        <div>
-                            <strong>
-                                Documento actualizado
-                            </strong>
-
-                            <span>
-                                Trabajo de Sistemas Operativos
-                            </span>
-
-                            <small>
-                                Hace 15 minutos
-                            </small>
-                        </div>
-
-                    </div>
-
-
-                    <div class="activity">
-
-                        <div class="activity-icon">
-                            📁
-                        </div>
-
-                        <div>
-                            <strong>
-                                Archivo subido
-                            </strong>
-
-                            <span>
-                                Redes_Trabajo_Final.pdf
-                            </span>
-
-                            <small>
-                                Hace 1 hora
-                            </small>
-                        </div>
-
-                    </div>
-
-
-                    <div class="activity">
-
-                        <div class="activity-icon">
-                            👥
-                        </div>
-
-                        <div>
-                            <strong>
-                                Nuevo miembro
-                            </strong>
-
-                            <span>
-                                Anahi se unió al proyecto
-                            </span>
-
-                            <small>
-                                Hace 3 horas
-                            </small>
-                        </div>
-
+                    <div class="activity" id="recentDocumentList" aria-live="polite">
+                        <p class="empty-state">Cargando documentos…</p>
                     </div>
 
                 </div>
@@ -377,7 +288,6 @@
 
                 <div>
                     <h2>Mis tareas</h2>
-                    <p>Organizá tus actividades académicas.</p>
                 </div>
 
                 <button class="primary-button" data-new-task>
@@ -396,19 +306,12 @@
                         <option value="completada">Finalizado</option>
                     </select>
                 </label>
-                <label>Prioridad
-                    <select id="filterTaskPriority">
-                        <option value="">Todas</option>
-                        <option value="baja">Baja</option>
-                        <option value="media">Media</option>
-                        <option value="alta">Alta</option>
-                    </select>
-                </label>
                 <label>Desde <input type="date" id="filterTaskFrom"></label>
                 <label>Hasta <input type="date" id="filterTaskTo"></label>
                 <button type="button" class="secondary-button" id="clearTaskFilters">Limpiar</button>
             </div>
             <div class="kanban" id="personalKanban" aria-live="polite"></div>
+            <p class="form-error" id="taskFilterError" role="alert"></p>
 </section>
 
 
@@ -420,7 +323,6 @@
 
                 <div>
                     <h2>Proyectos</h2>
-                    <p>Todos tus proyectos académicos.</p>
                 </div>
 
                 <button class="primary-button" id="newProjectBtn">
@@ -442,31 +344,11 @@
 
                 <div>
                     <h2>Archivos</h2>
-                    <p>Guardá y organizá tus archivos académicos.</p>
                 </div>
 
                 <button class="primary-button" id="uploadFileBtn" type="button">
                     ⬆ Subir archivo
                 </button>
-
-            </div>
-
-
-            <div class="storage">
-
-                <div class="storage-info">
-
-                    <span>Almacenamiento utilizado</span>
-
-                    <strong>
-                        <span id="storageUsage">Calculando almacenamiento…</span>
-                    </strong>
-
-                </div>
-
-                <div class="storage-bar">
-                    <div></div>
-                </div>
 
             </div>
 
@@ -507,6 +389,52 @@
 
     </main>
 
+    <dialog class="modal profile-modal" id="profileModal" aria-labelledby="profileTitle">
+        <form method="dialog">
+            <div class="modal-header"><h2 id="profileTitle">Mi perfil</h2><button class="close-modal" value="cancel" aria-label="Cerrar">×</button></div>
+            <p class="muted">Los datos se muestran desde tu cuenta autenticada. La edición estará disponible cuando exista una API de perfil.</p>
+            <div class="profile-fields">
+                <label>Nombres<input value="{{ user.first_name }}" disabled></label>
+                <label>Apellidos<input value="{{ user.last_name }}" disabled></label>
+                <label>Correo electrónico<input value="{{ user.email|default:'' }}" disabled></label>
+                <label>DNI<input value="{{ user.dni }}" disabled></label>
+                <label>Especialidad<input value="No registrada en el perfil" disabled></label>
+                <label>Contraseña<input type="password" placeholder="Cambio seguro pendiente" disabled autocomplete="new-password"></label>
+            </div>
+            <p class="form-error" role="status">No hay una operación de backend para guardar cambios de perfil o cambiar la contraseña.</p>
+            <div class="modal-actions"><button class="secondary-button" value="cancel">Cancelar</button><button class="primary-button" type="button" disabled>Guardar</button></div>
+        </form>
+    </dialog>
+    <dialog class="modal project-task-board-modal" id="projectTaskBoardModal" aria-labelledby="projectTaskBoardTitle">
+        <div class="modal-header"><h2 id="projectTaskBoardTitle">Tareas del proyecto</h2><button type="button" class="close-modal" id="closeProjectTaskBoard" aria-label="Cerrar">×</button></div>
+        <p id="projectTaskBoardMeta" class="muted"></p>
+        <div class="project-task-board-actions"><button type="button" class="secondary-button" id="backFromProjectTasks">Volver a proyectos</button><button type="button" class="primary-button" id="newProjectBoardTask">+ Nueva tarea</button></div>
+        <div class="kanban project-task-board" id="projectTaskBoard" aria-live="polite"></div>
+    </dialog>
+    <dialog class="modal project-documents-modal" id="projectDocumentsModal" aria-labelledby="projectDocumentsTitle">
+        <div class="modal-header">
+            <h2 id="projectDocumentsTitle">Documentos del proyecto</h2>
+            <button type="button" class="close-modal" id="closeProjectDocuments" aria-label="Cerrar">×</button>
+        </div>
+        <p id="projectDocumentsMeta" class="muted"></p>
+        <div class="project-documents-actions">
+            <button type="button" class="secondary-button" id="backFromProjectDocuments">Volver a proyectos</button>
+            <div>
+                <input type="file" id="projectResourceFileInput" accept=".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.txt,.csv" hidden>
+                <button type="button" class="secondary-button" id="uploadProjectResource">Subir archivo</button>
+                <button type="button" class="primary-button" id="newProjectDocument">Crear documento o informe</button>
+            </div>
+        </div>
+        <section aria-labelledby="projectFilesHeading">
+            <h3 id="projectFilesHeading">Archivos del proyecto</h3>
+            <div class="file-grid" id="projectResourceFiles" aria-live="polite"></div>
+        </section>
+        <section aria-labelledby="projectDocsHeading">
+            <h3 id="projectDocsHeading">Documentos e informes</h3>
+            <div class="document-list" id="projectResourceDocuments" aria-live="polite"></div>
+        </section>
+    </dialog>
+
 
     <!-- MODAL NUEVA TAREA -->
 
@@ -526,12 +454,6 @@
             <textarea id="taskDescription" maxlength="20000" rows="3"></textarea>
             <label for="taskDueDate">Fecha de entrega</label>
             <input type="date" id="taskDueDate">
-            <label for="priorityInput">Prioridad</label>
-            <select id="priorityInput">
-                <option value="baja">Baja</option>
-                <option value="media" selected>Media</option>
-                <option value="alta">Alta</option>
-            </select>
             <label for="taskStateInput">Estado</label>
             <select id="taskStateInput">
                 <option value="pendiente">Por hacer</option>
@@ -583,12 +505,35 @@
             <label for="documentProjectInput">Proyecto (opcional)</label>
             <select id="documentProjectInput"><option value="">Documento personal</option></select>
             <label for="documentContentInput">Contenido</label>
-            <textarea id="documentContentInput" rows="14" maxlength="1000000"></textarea>
+            <div class="document-toolbar" role="toolbar" aria-label="Formato del documento">
+                <label>Fuente <select id="documentFontFamily" aria-label="Familia tipográfica">
+                    <option value="Arial">Arial</option><option value="Georgia">Georgia</option>
+                    <option value="'Times New Roman'">Times New Roman</option><option value="Verdana">Verdana</option>
+                    <option value="Tahoma">Tahoma</option><option value="'Courier New'">Courier New</option>
+                </select></label>
+                <label>Tamaño <select id="documentFontSize" aria-label="Tamaño de letra">
+                    <option value="10">10</option><option value="12">12</option><option value="14">14</option>
+                    <option value="16" selected>16</option><option value="18">18</option><option value="24">24</option>
+                    <option value="32">32</option><option value="48">48</option>
+                </select></label>
+                <button type="button" data-format="bold" aria-label="Negrita"><strong>N</strong></button>
+                <button type="button" data-format="italic" aria-label="Cursiva"><em>K</em></button>
+                <button type="button" data-align="left" aria-label="Alinear a la izquierda">⇤</button>
+                <button type="button" data-align="center" aria-label="Centrar">↔</button>
+                <button type="button" data-align="right" aria-label="Alinear a la derecha">⇥</button>
+                <button type="button" data-align="justify" aria-label="Justificar">☰</button>
+            </div>
+            <div id="documentContentInput" class="document-writing-area" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido del documento"></div>
+            <div id="documentInvalidContent" class="document-invalid-content" role="alert" hidden>
+                <p>Este contenido no se puede abrir como documento enriquecido. El texto original se conserva para recuperarlo.</p>
+                <pre id="documentInvalidContentText"></pre>
+            </div>
             <p id="documentFormError" class="form-error" role="alert"></p>
             <div id="documentConflict" class="document-conflict" hidden>
                 <strong>Hay una versión guardada más reciente.</strong>
                 <p>Compara el contenido actual con tu borrador, combínalos en el editor y luego confirma el guardado.</p>
                 <pre id="documentConflictContent"></pre>
+                <button type="button" class="secondary-button" id="documentRestoreVersionBtn" hidden>Cargar versión guardada</button>
             </div>
             <div class="modal-actions">
                 <button type="button" class="danger-button" id="deleteDocumentBtn" hidden>Eliminar</button>

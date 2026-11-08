@@ -845,12 +845,19 @@ nav {
     display: block;
     width: 100%;
     padding: 20px;
-    background: var(--surface);
-    border: 1px solid var(--border);
+    background: linear-gradient(145deg, #fff8f1, var(--surface) 72%);
+    border: 2px solid #f4c7a1;
     border-radius: var(--radius);
     text-align: left;
     cursor: pointer;
     transition: transform 0.2s, box-shadow 0.2s;
+}
+
+#projectDetailView {
+    padding: 20px;
+    border: 3px solid #f4c7a1;
+    border-radius: 14px;
+    background: var(--surface);
 }
 
 .project-folder-card:hover,
@@ -1063,7 +1070,11 @@ nav {
     border: 1px solid var(--border);
     border-radius: 8px;
     overflow-y: auto;
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
 }
+.doc-read-only-body p { margin: 0 0 .65em; }
+.doc-read-only-body .teacher-invalid-rich-content { font-family: ui-monospace, monospace; font-size: .85rem; }
 
 .feedback-sidebar {
     display: flex;
@@ -1131,6 +1142,26 @@ nav {
     }
 }
 
+        .profile-trigger { border: 0; background: transparent; color: inherit; cursor: pointer; text-align: left; }
+        .profile-modal { width: min(600px, calc(100vw - 30px)); max-height: 90vh; overflow: auto; border: 1px solid var(--border); border-radius: 14px; padding: 22px; background: var(--surface); color: var(--text); }
+        .profile-modal::backdrop { background: rgba(15, 23, 42, .5); }
+        .profile-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .profile-fields label { display: grid; gap: 5px; font-size: 13px; color: var(--text-muted); }
+        .profile-fields input { width: 100%; padding: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-alt); color: var(--text); }
+        .teacher-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
+        .teacher-summary-card { padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
+        .teacher-summary-card > span { color: var(--primary); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
+        .teacher-summary-card h3 { margin: 5px 0 12px; }
+        .teacher-summary-counts { display: flex; flex-wrap: wrap; gap: 14px; }
+        .teacher-summary-counts p { margin: 0; }
+        .teacher-summary-counts strong { display: block; font-size: 1.5rem; }
+        .teacher-file-actions { display: flex; gap: 8px; }
+        .teacher-folder-grid { display: flex; flex-wrap: wrap; gap: 9px; margin: 14px 0; }
+        .teacher-folder-card { border: 1px solid #f4c7a1; border-radius: 9px; padding: 10px 14px; background: #fff4e9; color: #8a3d0b; cursor: pointer; }
+        .catedra-files-nav { border: 1px solid #f4c7a1; background: #fff4e9; color: #8a3d0b; }
+        .catedra-files-nav:hover, .catedra-files-nav.active { background: #ffead6; color: #71350d; }
+        .pending-review-item { padding: 7px 0; border-bottom: 1px solid var(--border); }
+        @media (max-width: 680px) { .teacher-summary-grid, .profile-fields { grid-template-columns: 1fr; } .teacher-file-actions { flex-wrap: wrap; } #projectDetailView { padding: 12px; } }
     </style>
 
     <!-- Se carga en el <head> para aplicar el tema guardado antes de pintar (evita el "parpadeo") -->
@@ -1208,17 +1239,17 @@ nav {
             <a href="#inicio" class="nav-item active" data-section="inicio" data-title="Gestión de Cátedra">
                 <span aria-hidden="true">🏠</span> Inicio
             </a>
-            <a href="#archivos-catedra" class="nav-item" data-section="archivos-catedra" data-title="Archivos de Cátedra">
+            <a href="#archivos-catedra" class="nav-item catedra-files-nav" data-section="archivos-catedra" data-title="Archivos de Cátedra">
                 <span aria-hidden="true">📁</span> Archivos de Cátedra
             </a>
             <a href="#proyectos" class="nav-item" data-section="proyectos" data-title="Proyectos de Alumnos">
                 <span aria-hidden="true">📊</span> Proyectos de Alumnos
             </a>
+            <a href="#revisiones" class="nav-item" data-section="revisiones" data-title="Entregas y Revisiones">
+                <span aria-hidden="true">&#128229;</span> Entregas y revisiones
+            </a>
             <a href="#documentos" class="nav-item" data-section="documentos" data-title="Documentos de Cátedra">
                 <span aria-hidden="true">📝</span> Documentos
-            </a>
-            <a href="{% url 'core:alumno' %}" target="_top" class="role-switch-link">
-                <span aria-hidden="true">👨‍🎓</span> Vista Alumno
             </a>
         </nav>
 
@@ -1228,15 +1259,6 @@ nav {
         </form>
 
         <div class="sidebar-bottom">
-            <button type="button" class="sidebar-option" id="settingsBtn">
-                <div class="sidebar-option-icon settings-icon" aria-hidden="true">⚙️</div>
-                <div class="sidebar-option-text">
-                    <strong>Configuración</strong>
-                    <span>Opciones de la cátedra</span>
-                </div>
-                <div class="sidebar-option-arrow" aria-hidden="true">→</div>
-            </button>
-
             <div class="dark-mode-card">
                 <div class="dark-mode-left">
                     <div class="dark-mode-icon" aria-hidden="true">🌙</div>
@@ -1264,18 +1286,15 @@ nav {
             </div>
 
             <div class="header-right">
-                <button type="button" class="icon-button" id="notificationBtn" aria-label="Notificaciones">
-                    🔔 <span class="notification-dot" id="notificationDot"></span>
-                </button>
                 <button type="button" class="icon-button" id="themeBtn" aria-label="Cambiar tema">🌙</button>
 
-                <div class="profile">
-                    <div class="avatar" aria-hidden="true">PG</div>
+                <button type="button" class="profile profile-trigger" id="teacherProfileBtn" aria-haspopup="dialog" aria-controls="teacherProfileModal">
+                    <div class="avatar" aria-hidden="true">{{ user.first_name|default:user.dni|slice:":1" }}{{ user.last_name|default:""|slice:":1" }}</div>
                     <div>
-                        <strong>Prof. Gómez</strong>
+                        <strong>{{ user.get_full_name|default:user.dni }}</strong>
                         <small class="badge-role">Docente</small>
                     </div>
-                </div>
+                </button>
             </div>
         </header>
 
@@ -1285,52 +1304,45 @@ nav {
             <div class="welcome-card">
                 <div>
                     <span class="welcome-label">👋 Panel de Control Docente</span>
-                    <h2>Hola, Prof. Gómez</h2>
+                    <h2>Hola, {{ user.first_name|default:user.dni }}</h2>
                     <p id="welcomeText">Cargando resumen…</p>
                 </div>
                 <div class="welcome-decoration" aria-hidden="true">📚</div>
+            </div>
+            <div class="teacher-summary-grid">
+                <article class="teacher-summary-card"><span>RESUMEN</span><h3>Actividad de la cátedra</h3><div class="teacher-summary-counts"><p><strong id="summaryProjects">0</strong> Proyectos activos</p><p><strong id="summaryTasks">0</strong> Tareas asignadas</p><p><strong id="summaryDeliveries">0</strong> Entregas recibidas</p><p><strong id="summaryEvaluations">0</strong> Evaluaciones vigentes</p><p><strong id="summaryDocuments">0</strong> Documentos disponibles</p></div></article>
+                <article class="teacher-summary-card"><span>SEGUIMIENTO</span><h3>Registros sin devolución</h3><div id="pendingReviewList" aria-live="polite"><p class="muted">Cargando proyectos y documentos…</p></div><button type="button" class="text-button" id="viewProjectsBtn">Ver proyectos</button></article>
             </div>
         </section>
 
 
         <!-- ARCHIVOS DE CÁTEDRA -->
+        <section id="revisiones" class="section" hidden>
+            <div class="section-header">
+                <div>
+                    <h2>Entregas y revisiones</h2>
+                    <p>Accedé a las entregas y documentos asociados a los proyectos asignados.</p>
+                </div>
+            </div>
+            <div id="reviewQueue" class="review-queue" aria-live="polite"><p class="muted">Cargando revisiones...</p></div>
+        </section>
+
         <section id="archivos-catedra" class="section" hidden>
             <div class="section-header">
                 <div>
                     <h2>Mis Archivos de Cátedra</h2>
                     <p>Subí y gestioná tus materiales didácticos, guías y documentos teóricos.</p>
                 </div>
-                <button type="button" class="primary-button" id="uploadBtn">⬆ Subir archivo</button>
+                <div class="teacher-file-actions"><button type="button" class="primary-button" id="uploadBtn">⬆ Subir archivos</button><button type="button" class="secondary-button" id="createTeacherFolderBtn">Crear carpeta</button></div>
                 <input type="file" id="fileInput" accept=".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.txt,.csv" multiple hidden>
             </div>
 
             <label for="fileProjectSelect">Compartir en proyecto (opcional)</label>
             <select id="fileProjectSelect"><option value="">Archivo personal de cátedra</option></select>
 
-            <div class="file-grid" id="fileGrid">
-                <div class="file-card">
-                    <div class="file-icon pdf">PDF</div>
-                    <div class="file-details">
-                        <strong>Guia_Practica_Unidad1.pdf</strong>
-                        <span>1.5 MB • Subido hace 2 días</span>
-                    </div>
-                    <div class="file-actions">
-                        <button type="button" data-action="download-file" title="Descargar" aria-label="Descargar">⬇</button>
-                        <button type="button" data-action="delete-file" title="Eliminar" aria-label="Eliminar">🗑️</button>
-                    </div>
-                </div>
-
-                <div class="file-card">
-                    <div class="file-icon folder">📁</div>
-                    <div class="file-details">
-                        <strong>Exámenes_2026</strong>
-                        <span>8 archivos</span>
-                    </div>
-                    <div class="file-actions">
-                        <button type="button" title="Abrir" aria-label="Abrir carpeta">📂</button>
-                    </div>
-                </div>
-            </div>
+            <div class="file-toolbar"><label for="teacherFolderSelect">Carpeta</label><select id="teacherFolderSelect"><option value="">Todas las carpetas</option></select></div>
+            <div class="teacher-folder-grid" id="teacherFolderGrid" aria-label="Carpetas de archivos"></div>
+            <div class="file-grid" id="fileGrid" aria-live="polite"></div>
         </section>
 
 
@@ -1542,6 +1554,23 @@ nav {
     <!-- Aviso emergente -->
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
+    <dialog class="modal modal-small profile-modal" id="teacherProfileModal" aria-labelledby="teacherProfileTitle">
+        <form method="dialog">
+            <div class="modal-header"><h2 id="teacherProfileTitle">Mi perfil docente</h2><button type="submit" class="close-modal" value="cancel" aria-label="Cerrar">×</button></div>
+            <p class="muted">Los datos se muestran desde la cuenta autenticada. La edición requiere una API de perfil.</p>
+            <div class="profile-fields">
+                <label>Nombres<input value="{{ user.first_name }}" disabled></label>
+                <label>Apellidos<input value="{{ user.last_name }}" disabled></label>
+                <label>Correo electrónico<input value="{{ user.email|default:'' }}" disabled></label>
+                <label>DNI<input value="{{ user.dni }}" disabled></label>
+                <label>Materias a cargo<input value="No disponibles en el perfil actual" disabled></label>
+                <label>Contraseña<input type="password" placeholder="Cambio seguro pendiente" disabled autocomplete="new-password"></label>
+            </div>
+            <p class="form-error" role="status">No existe una operación de backend para guardar el perfil o cambiar la contraseña.</p>
+            <div class="modal-actions"><button type="submit" class="secondary-button" value="cancel">Cancelar</button><button type="button" class="primary-button" disabled>Guardar</button></div>
+        </form>
+    </dialog>
+
 <script>
 /* ==========================================================
    EduFlow - Lógica de la vista Docente
@@ -1551,6 +1580,9 @@ nav {
 
     /* ---------- Datos de ejemplo (luego vendrán de un backend) ---------- */
     var projects = [];
+    var teacherDocuments = [];
+    var teacherFolders = [];
+    var selectedTeacherFolder = '';
 
     var COLUMNS = [
         { key: 'todo', label: 'Por Hacer' },
@@ -1564,6 +1596,8 @@ nav {
     var teacherDocumentSaving = false;
     var teacherDocumentLoading = false;
     var teacherConflictDocument = null;
+    var projectLoadRequest = 0;
+    var teacherFilesRequest = 0;
 
     function csrfToken() {
         var input = document.querySelector('[name="csrfmiddlewaretoken"]');
@@ -1626,6 +1660,7 @@ nav {
     }
 
     function loadProjects() {
+        var requestId = ++projectLoadRequest;
         return Promise.all([requestJson('/proyectos/api/'), requestJson('/documentos/api/')])
             .then(function (results) {
                 var docs = results[1].documentos;
@@ -1645,6 +1680,8 @@ nav {
                         });
                     })).then(function () { return mapped; });
                 })).then(function (loadedProjects) {
+                    if (requestId !== projectLoadRequest) return;
+                    teacherDocuments = docs;
                     projects = loadedProjects;
                 var projectSelect = $('fileProjectSelect');
                 if (projectSelect) {
@@ -1661,7 +1698,7 @@ nav {
                 renderGeneralDocuments(docs);
                 });
             })
-            .catch(function (error) { toast(error.message); });
+            .catch(function (error) { if (requestId === projectLoadRequest) toast(error.message); });
     }
 
     /* ---------- Utilidades ---------- */
@@ -1733,10 +1770,61 @@ nav {
 
     /* ---------- Inicio ---------- */
     function renderWelcome() {
-        var n = projects.length;
+        var n = projects.filter(function (project) { return project.progress < 100; }).length;
+        var tasks = projects.reduce(function (all, project) { return all.concat(project.tasks); }, []);
+        var deliveries = tasks.reduce(function (total, task) { return total + task.deliveries.length; }, 0);
+        var evaluations = tasks.reduce(function (total, task) {
+            return total + (task.groupEvaluation ? 1 : 0) + task.individualEvaluations.length;
+        }, 0) + teacherDocuments.filter(function (doc) { return doc.calificacion || doc.retroalimentacion; }).length
+            + projects.reduce(function (total, project) {
+                return total + project.devoluciones.filter(function (entry) {
+                    return !entry.anulada && entry.tipo !== 'historica' && !entry.tarea_id && !entry.documento_id;
+                }).length;
+            }, 0);
         $('welcomeText').textContent =
-            'Hay ' + n + (n === 1 ? ' proyecto grupal' : ' proyectos grupales') +
+            'Hay ' + n + (n === 1 ? ' proyecto asignado' : ' proyectos asignados') +
             ' para revisar.';
+        $('summaryProjects').textContent = String(n);
+        $('summaryTasks').textContent = String(tasks.length);
+        $('summaryDeliveries').textContent = String(deliveries);
+        $('summaryEvaluations').textContent = String(evaluations);
+        $('summaryDocuments').textContent = String(teacherDocuments.length);
+        var pendingTasks = tasks.filter(function (task) {
+            return task.deliveries.length > 0 && !task.groupEvaluation;
+        });
+        var pending = teacherDocuments.filter(function (doc) {
+            return doc.proyecto_id && !doc.calificacion && !doc.retroalimentacion;
+        });
+        var list = $('pendingReviewList');
+        var queue = $('reviewQueue');
+        list.replaceChildren();
+        queue.replaceChildren();
+        if (!pending.length && !pendingTasks.length) {
+            list.appendChild(el('p', 'muted', 'No hay entregas sin evaluación grupal ni documentos sin devolución registrada.'));
+            queue.appendChild(el('p', 'muted', 'No hay registros sin devolución para los proyectos cargados.'));
+        }
+        pendingTasks.forEach(function (task) {
+            var project = projects.filter(function (item) { return item.tasks.indexOf(task) !== -1; })[0];
+            if (!project) return;
+            var label = 'Entrega sin evaluación grupal: ' + task.title + ' · ' + project.name;
+            list.appendChild(el('p', 'pending-review-item', label));
+            var taskButton = el('button', 'text-button review-queue-item', label);
+            taskButton.type = 'button';
+            taskButton.dataset.reviewProjectId = project.id;
+            taskButton.dataset.reviewTaskId = task.id;
+            queue.appendChild(taskButton);
+        });
+        pending.forEach(function (doc) {
+            var project = projects.filter(function (item) { return item.id === Number(doc.proyecto_id); })[0];
+            if (!project) return;
+            var label = 'Documento sin devolución: ' + doc.titulo + ' · ' + project.name;
+            list.appendChild(el('p', 'pending-review-item', label));
+            var docButton = el('button', 'text-button review-queue-item', label);
+            docButton.type = 'button';
+            docButton.dataset.reviewProjectId = project.id;
+            docButton.dataset.reviewDocId = doc.id;
+            queue.appendChild(docButton);
+        });
     }
 
     /* ---------- Archivos de cátedra ---------- */
@@ -1748,16 +1836,33 @@ nav {
             Promise.all(files.map(function (file) {
                 var data = new FormData(); data.append('archivo', file);
                 if ($('fileProjectSelect').value) data.append('proyecto', $('fileProjectSelect').value);
+                if (selectedTeacherFolder) data.append('carpeta', selectedTeacherFolder);
                 return requestJson('/archivos/api/', { method: 'POST', headers: { 'X-CSRFToken': csrfToken() }, body: data });
             })).then(function () { toast(files.length + ' archivo(s) subido(s)'); return loadTeacherFiles(); })
                 .catch(function (error) { toast(error.message); });
             e.target.value = '';
         });
+        $('teacherFolderSelect').addEventListener('change', function () {
+            selectedTeacherFolder = this.value;
+            loadTeacherFiles();
+        });
+        $('createTeacherFolderBtn').addEventListener('click', function () {
+            var name = window.prompt('Nombre de la carpeta:');
+            if (!name || !name.trim()) return;
+            var data = new FormData(); data.append('nombre', name.trim());
+            requestJson('/archivos/api/carpetas/', { method: 'POST', headers: { 'X-CSRFToken': csrfToken() }, body: data })
+                .then(function (result) { return loadTeacherFolders(result.carpeta.id); })
+                .catch(function (error) { toast(error.message); });
+        });
         loadTeacherFiles();
+        loadTeacherFolders();
     }
 
     function loadTeacherFiles() {
-        return requestJson('/archivos/api/').then(function (result) {
+        var requestId = ++teacherFilesRequest;
+        var query = selectedTeacherFolder ? '?carpeta=' + encodeURIComponent(selectedTeacherFolder) : '';
+        return requestJson('/archivos/api/' + query).then(function (result) {
+            if (requestId !== teacherFilesRequest) return;
             var grid = $('fileGrid'); grid.replaceChildren();
             if (!result.archivos.length) grid.appendChild(el('p', 'muted', 'Todavía no hay archivos disponibles.'));
             result.archivos.forEach(function (file) {
@@ -1771,6 +1876,30 @@ nav {
                 var link = el('a', 'text-button', 'Descargar'); link.href = file.descarga; card.appendChild(link);
                 grid.appendChild(card);
             });
+        }).catch(function (error) { if (requestId === teacherFilesRequest) toast(error.message); });
+    }
+
+    function loadTeacherFolders(selectId) {
+        return requestJson('/archivos/api/carpetas/').then(function (result) {
+            teacherFolders = result.carpetas;
+            var select = $('teacherFolderSelect');
+            select.replaceChildren(new Option('Todas las carpetas', ''));
+            teacherFolders.forEach(function (folder) { select.add(new Option(folder.nombre, folder.id)); });
+            var folderGrid = $('teacherFolderGrid');
+            folderGrid.replaceChildren();
+            teacherFolders.forEach(function (folder) {
+                var button = el('button', 'teacher-folder-card', '📁 ' + folder.nombre);
+                button.type = 'button';
+                button.addEventListener('click', function () {
+                    select.value = String(folder.id);
+                    selectedTeacherFolder = select.value;
+                    loadTeacherFiles();
+                });
+                folderGrid.appendChild(button);
+            });
+            if (selectId) select.value = String(selectId);
+            selectedTeacherFolder = select.value;
+            return loadTeacherFiles();
         }).catch(function (error) { toast(error.message); });
     }
 
@@ -1797,6 +1926,7 @@ nav {
             var info = el('div', 'project-members-info');
             info.appendChild(el('strong', null, '👥 Integrantes:'));
             info.appendChild(el('p', null, p.members.join(', ') || 'Sin integrantes asignados'));
+            info.appendChild(el('p', 'muted', p.members.length > 1 ? 'Trabajo grupal' : 'Trabajo individual'));
             info.appendChild(el('p', 'muted', 'Entrega: ' + (p.dueDate ? formatDate(p.dueDate) : 'Sin fecha')));
             card.appendChild(info);
 
@@ -2150,7 +2280,9 @@ nav {
         docs.forEach(function (doc) {
             var card = el('details', 'document-card');
             card.appendChild(el('summary', null, doc.titulo + ' · ' + (doc.proyecto || 'Personal')));
-            card.appendChild(el('p', 'doc-content-preview', doc.contenido || 'Documento vacío.'));
+            var preview = el('div', 'doc-content-preview');
+            renderTeacherDocumentContent(doc.contenido, preview);
+            card.appendChild(preview);
             if (doc.retroalimentacion) card.appendChild(el('p', 'muted', 'Retroalimentación: ' + doc.retroalimentacion));
             if (doc.calificacion) card.appendChild(el('p', 'muted', 'Calificación: ' + doc.calificacion));
             if (doc.puede_editar) {
@@ -2160,6 +2292,70 @@ nav {
                 card.appendChild(edit);
             }
             list.appendChild(card);
+        });
+    }
+
+    function hasTeacherDocumentKeys(value, keys) {
+        return value && typeof value === 'object' && !Array.isArray(value)
+            && Object.keys(value).length === keys.length
+            && Object.keys(value).every(function (key) { return keys.indexOf(key) !== -1; });
+    }
+
+    function renderTeacherDocumentContent(content, container) {
+        container.replaceChildren();
+        var raw = String(content || '');
+        if (!raw) raw = 'Documento vacío.';
+        var parsed;
+        try { parsed = JSON.parse(raw); } catch (_) { parsed = null; }
+        var isRich = parsed && parsed.format === 'eduflow.rich-text' && parsed.version === 1;
+        var valid = isRich && hasTeacherDocumentKeys(parsed, ['format', 'version', 'blocks'])
+            && Array.isArray(parsed.blocks) && parsed.blocks.length > 0 && parsed.blocks.length <= 1000;
+        var fonts = ['Arial', 'Georgia', 'Times New Roman', 'Verdana', 'Tahoma', 'Courier New'];
+        var sizes = [10, 12, 14, 16, 18, 24, 32, 48];
+        var runCount = 0;
+        var textLength = 0;
+        if (valid) {
+            valid = parsed.blocks.every(function (block) {
+                if (!hasTeacherDocumentKeys(block, ['type', 'align', 'runs'])
+                    || block.type !== 'paragraph'
+                    || ['left', 'center', 'right', 'justify'].indexOf(block.align) === -1
+                    || !Array.isArray(block.runs) || block.runs.length === 0) return false;
+                runCount += block.runs.length;
+                if (runCount > 10000) return false;
+                return block.type === 'paragraph'
+                    && block.runs.every(function (run) {
+                        if (!hasTeacherDocumentKeys(run, ['text', 'bold', 'italic', 'font', 'size'])
+                            || typeof run.text !== 'string' || typeof run.bold !== 'boolean'
+                            || typeof run.italic !== 'boolean' || fonts.indexOf(run.font) === -1
+                            || sizes.indexOf(run.size) === -1) return false;
+                        textLength += Array.from(run.text).length;
+                        return textLength <= 900000
+                    });
+            });
+        }
+        if (isRich && !valid) {
+            var invalid = el('pre', 'teacher-invalid-rich-content', raw);
+            container.appendChild(invalid);
+            return;
+        }
+        var blocks = valid ? parsed.blocks : raw.split('\n').map(function (text) {
+            return { type: 'paragraph', align: 'left', runs: [{ text: text, bold: false, italic: false, font: 'Arial', size: 16 }] };
+        });
+        if (!blocks.length) blocks = [{ type: 'paragraph', align: 'left', runs: [{ text: 'Documento vacío.', bold: false, italic: false, font: 'Arial', size: 16 }] }];
+        blocks.forEach(function (block) {
+            var paragraph = el('p');
+            paragraph.style.textAlign = block.align;
+            block.runs.forEach(function (run) {
+                var span = document.createElement('span');
+                span.style.fontFamily = run.font;
+                span.style.fontSize = run.size + 'px';
+                var textNode = document.createTextNode(run.text);
+                if (run.italic) { var italic = document.createElement('em'); italic.appendChild(textNode); textNode = italic; }
+                if (run.bold) { var bold = document.createElement('strong'); bold.appendChild(textNode); textNode = bold; }
+                span.appendChild(textNode);
+                paragraph.appendChild(span);
+            });
+            container.appendChild(paragraph);
         });
     }
 
@@ -2277,12 +2473,12 @@ nav {
         $('projectDocList').addEventListener('click', function (e) {
             var btn = e.target.closest('[data-doc-id]');
             if (!btn) return;
-            var doc = currentProject().docs.filter(function (d) { return d.id === btn.dataset.docId; })[0];
+            var doc = currentProject().docs.filter(function (d) { return d.id === Number(btn.dataset.docId); })[0];
             if (!doc) return;
 
             state.docId = doc.id;
             $('docTitlePreview').textContent = 'Documento: ' + doc.name;
-            $('docBody').replaceChildren(el('p', null, doc.body || 'Documento vacío.'));
+            renderTeacherDocumentContent(doc.body, $('docBody'));
             renderComments(doc.feedback ? [{ author: 'Retroalimentación docente', text: doc.feedback, when: '' }] : []);
             $('commentText').value = doc.feedback || '';
             $('feedbackGrade').value = doc.grade || '';
@@ -2315,12 +2511,27 @@ nav {
 
     /* ---------- Botones decorativos ---------- */
     function initMisc() {
-        $('settingsBtn').addEventListener('click', function () { toast('Configuración: próximamente'); });
-        $('notificationBtn').addEventListener('click', function () {
-            $('notificationDot').hidden = true;
-            toast('No tenés notificaciones nuevas');
-        });
         $('backToProjects').addEventListener('click', closeProject);
+        $('viewProjectsBtn').addEventListener('click', function () {
+            document.querySelector('.nav-item[data-section="proyectos"]').click();
+        });
+        $('teacherProfileBtn').addEventListener('click', function () { $('teacherProfileModal').showModal(); });
+
+        $('reviewQueue').addEventListener('click', function (event) {
+            var button = event.target.closest('[data-review-project-id]');
+            if (!button) return;
+            var projectId = Number(button.dataset.reviewProjectId);
+            document.querySelector('.nav-item[data-section="proyectos"]').click();
+            openProject(projectId);
+            if (button.dataset.reviewTaskId) {
+                var taskButton = document.querySelector('#kanbanBoard [data-grade-task-id="' + button.dataset.reviewTaskId + '"]');
+                if (taskButton) taskButton.click();
+            } else if (button.dataset.reviewDocId) {
+                switchTab('tab-docs');
+                var docButton = document.querySelector('#projectDocList [data-doc-id="' + button.dataset.reviewDocId + '"]');
+                if (docButton) docButton.click();
+            }
+        });
 
         document.querySelectorAll('.tab-btn').forEach(function (btn) {
             btn.addEventListener('click', function () { switchTab(btn.dataset.tab); });
