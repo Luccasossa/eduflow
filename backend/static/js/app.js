@@ -486,6 +486,7 @@
             content.appendChild(taskTitle);
             content.appendChild(make("p", "", task.descripcion || "Sin descripción."));
             const project = projects.find((item) => item.id === task.proyecto_id);
+            content.appendChild(make("p", "", "Materia: No especificada"));
             content.appendChild(make("p", "", `Creada: ${dateLabel(task.fecha_creacion?.slice(0, 10))} · Entrega: ${dateLabel(task.fecha_vencimiento)} · Prioridad: ${task.prioridad} · Estado: ${states.find(([value]) => value === task.estado)?.[1] || task.estado}${project ? ` · Proyecto: ${project.nombre}` : ""}`));
             content.appendChild(make("h3", "", "Archivos adjuntos"));
             const files = make("div", "detail-attachments");
@@ -498,8 +499,8 @@
                 const link = make("a", "text-button", `Descargar ${delivery.nombre}`); link.href = delivery.descarga; content.appendChild(link);
                 if (delivery.correccion) {
                     const correction = delivery.correccion;
-                    content.appendChild(make("p", "", `Corrección: ${correction.estado} · ${new Date(correction.fecha).toLocaleString("es-AR")}`));
-                    if (correction.calificacion) content.appendChild(make("p", "", `Calificación: ${correction.calificacion}/${document.body.dataset.gradeMax}`));
+                    content.appendChild(make("p", "", `Estado de revisión: ${correction.estado} · Fecha de devolución: ${new Date(correction.fecha).toLocaleString("es-AR")}`));
+                    if (correction.calificacion !== "") content.appendChild(make("p", "", `Calificación: ${correction.calificacion}/${document.body.dataset.gradeMax}`));
                     if (correction.comentario) content.appendChild(make("p", "", correction.comentario));
                 } else content.appendChild(make("p", "empty-state", "La entrega aún no tiene devolución docente."));
             });

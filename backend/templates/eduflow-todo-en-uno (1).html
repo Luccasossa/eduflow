@@ -1795,6 +1795,63 @@ nav {
         showSection(location.hash.replace('#', '') || 'inicio');
     }
 
+    function openTeacherAssignedTask(assignment) {
+        var modal = $('teacherTaskDetailModal'), box = $('teacherTaskDetailContent');
+        $('teacherTaskDetailTitle').textContent = 'Tarea · ' + assignment.titulo;
+        box.replaceChildren(el('p', 'muted', 'Cargando tarea…'));
+        modal.showModal();
+        Promise.all([requestJson('/tareas/api/' + assignment.tarea_id + '/'), requestJson('/tareas/api/' + assignment.tarea_id + '/entregas/')])
+            .then(function (results) {
+                var task = results[0].tarea, deliveries = results[1].entregas;
+                box.replaceChildren(el('p', '', 'Alumno: ' + assignment.alumno), el('p', '', 'Materia: No especificada'),
+                    el('h3', '', 'Descripción'), el('p', '', task.descripcion || 'Sin descripción.'),
+                    el('p', '', 'Fecha de entrega: ' + (task.fecha_vencimiento || 'Sin fecha') + ' · Estado: ' + task.estado),
+                    el('h3', '', 'Archivos adjuntos'));
+                (task.archivos_adjuntos || []).forEach(function (file) {
+                    var link = el('a', 'text-button', file.nombre); link.href = file.abrir; link.target = '_blank'; link.rel = 'noopener noreferrer'; box.appendChild(link);
+                });
+                if (!(task.archivos_adjuntos || []).length) box.appendChild(el('p', 'empty-state', 'No hay archivos adjuntos a la tarea.'));
+                box.appendChild(el('h3', '', 'Entrega y devoluciones'));
+                if (!deliveries.length) { box.appendChild(el('p', 'empty-state', 'El alumno todavía no entregó esta tarea.')); return; }
+                deliveries.forEach(function (delivery) {
+                    box.appendChild(el('p', '', 'Estado de entrega: ' + delivery.estado + ' · ' + new Date(delivery.fecha_entrega).toLocaleString('es-AR') + (delivery.observaciones ? ' · ' + delivery.observaciones : '')));
+                    var download = el('a', 'text-button', 'Descargar ' + delivery.nombre); download.href = delivery.descarga; box.appendChild(download);
+                    var preview = el('a', 'text-button', 'Abrir entrega'); preview.href = delivery.descarga + '?inline=1'; preview.target = '_blank'; preview.rel = 'noopener noreferrer'; box.appendChild(preview);
+                    requestJson('/tareas/entregas/' + delivery.id + '/correccion/').then(function (result) {
+                        box.appendChild(el('h3', '', 'Calificaciones y retroalimentaciones anteriores'));
+                        if (!result.historial.length) box.appendChild(el('p', 'empty-state', 'Todavía no hay devoluciones.'));
+                        result.historial.forEach(function (entry) {
+                            var item = el('article', 'project-feedback-entry');
+                            item.appendChild(el('strong', '', (entry.anulada ? 'Anulada · ' : '') + entry.profesor + ' · ' + new Date(entry.fecha).toLocaleString('es-AR') + ' · ' + entry.estado));
+                            if (entry.comentario) item.appendChild(el('p', '', entry.comentario));
+                            if (entry.calificacion !== '') item.appendChild(el('p', '', 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
+                            box.appendChild(item);
+                        });
+                        var current = result.correccion, form = el('form', 'teacher-evaluation-form');
+                        var gradeLabel = el('label', '', 'Calificación (opcional)'), grade = document.createElement('input');
+                        grade.type = 'number'; grade.min = '0'; grade.max = document.body.dataset.gradeMax; grade.step = '0.01'; grade.value = current ? current.calificacion : ''; gradeLabel.appendChild(grade);
+                        var commentLabel = el('label', '', 'Comentario (opcional)'), comment = document.createElement('textarea');
+                        comment.maxLength = 20000; comment.rows = 4; comment.value = current ? current.comentario : ''; commentLabel.appendChild(comment);
+                        var stateLabel = el('label', '', 'Estado de revisión'), state = document.createElement('select');
+                        [['corregida', 'Corregida'], ['devuelta', 'Devuelta para correcciones'], ['en_revision', 'En revisión']].forEach(function (option) { state.add(new Option(option[1], option[0], false, current ? current.estado === option[0] : option[0] === 'corregida')); }); stateLabel.appendChild(state);
+                        var error = el('p', 'form-error', ''), save = el('button', 'primary-button', current ? 'Guardar cambios' : 'Guardar devolución'); save.type = 'submit';
+                        form.append(gradeLabel, commentLabel, stateLabel, error, save);
+                        form.addEventListener('submit', function (event) {
+                            event.preventDefault(); error.textContent = '';
+                            requestJson('/tareas/entregas/' + delivery.id + '/correccion/', {method: current ? 'PUT' : 'POST', headers: {'Content-Type':'application/json','X-CSRFToken':csrfToken()}, body: JSON.stringify({calificacion: grade.value, comentario: comment.value.trim(), estado: state.value})})
+                                .then(function () { openTeacherAssignedTask(assignment); toast('Devolución guardada.'); }).catch(function (err) { error.textContent = err.message; });
+                        });
+                        box.appendChild(form);
+                        if (current) {
+                            var remove = el('button', 'text-button danger-text', 'Eliminar devolución'); remove.type = 'button';
+                            remove.addEventListener('click', function () { requestJson('/tareas/entregas/' + delivery.id + '/correccion/', {method:'DELETE', headers:{'X-CSRFToken':csrfToken()}}).then(function () { openTeacherAssignedTask(assignment); toast('Devolución eliminada.'); }).catch(function (err) { toast(err.message); }); });
+                            box.appendChild(remove);
+                        }
+                    }).catch(function (err) { box.appendChild(el('p', 'form-error', err.message)); });
+                });
+            }).catch(function (err) { box.replaceChildren(el('p', 'form-error', err.message)); });
+    }
+
     function loadStudentTaskAssignments() {
         var list = $('studentTaskAssignmentList');
         if (!list) return Promise.resolve();
@@ -1814,6 +1871,9 @@ nav {
                 card.appendChild(el('p', '', 'Alumno: ' + assignment.alumno + ' · Materia: no definida en el perfil actual'));
                 card.appendChild(el('p', '', assignment.descripcion || 'Sin descripción.'));
                 card.appendChild(el('p', '', 'Fecha de entrega: ' + (assignment.fecha_vencimiento || 'Sin fecha') + ' · Estado: ' + assignment.estado));
+                var taskView = el('button', 'text-button', 'Ver tarea'); taskView.type = 'button';
+                taskView.addEventListener('click', function () { openTeacherAssignedTask(assignment); });
+                card.appendChild(taskView);
                 if (!assignment.entregas.length) card.appendChild(el('p', 'empty-state', 'El alumno todavía no entregó esta tarea.'));
                 assignment.entregas.forEach(function (delivery) {
                     var submission = el('div', 'project-feedback-entry');

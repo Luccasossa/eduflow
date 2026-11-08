@@ -229,6 +229,7 @@ def api_asignaciones(request):
                 "fecha_vencimiento": assignment.tarea.fecha_vencimiento.isoformat() if assignment.tarea.fecha_vencimiento else "",
                 "estado": assignment.tarea.estado, "alumno_id": assignment.alumno_id,
                 "alumno": assignment.alumno.get_full_name() or assignment.alumno.dni,
+                "archivos_adjuntos": _serializar(assignment.tarea, request.user)["archivos_adjuntos"],
                 "entregas": [_serializar_entrega(delivery) for delivery in deliveries],
             })
         return JsonResponse({"asignaciones": rows})
@@ -408,7 +409,7 @@ def _serializar_entrega(entrega):
 def _serializar_correccion(item):
     return {"id": item.pk, "calificacion": str(item.calificacion) if item.calificacion is not None else "", "comentario": item.comentario,
             "estado": item.estado, "profesor": item.profesor.get_full_name() or item.profesor.dni,
-            "fecha": item.fecha_correccion.isoformat()}
+            "fecha": item.fecha_correccion.isoformat(), "anulada": item.anulada_en is not None}
 
 
 @login_required
