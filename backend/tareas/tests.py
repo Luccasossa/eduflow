@@ -61,6 +61,24 @@ class TablerosTests(TestCase):
         self.assertIsNone(tarea.proyecto)
         self.assertEqual(tarea.fecha_vencimiento.isoformat(), "2026-11-02")
 
+    def test_tarea_creada_por_alumno_aparece_en_lista_y_detalle(self):
+        self.client.force_login(self.alumno)
+        created = self.json_post(reverse("api_tareas"), {
+            "titulo": "Lectura de historia",
+            "descripcion": "Preparar el resumen del capítulo.",
+        })
+        self.assertEqual(created.status_code, 201, created.content)
+        task_id = created.json()["tarea"]["id"]
+
+        listing = self.client.get(reverse("api_tareas"))
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual([task["id"] for task in listing.json()["tareas"]], [task_id])
+
+        detail = self.client.get(reverse("api_tarea", args=[task_id]))
+        self.assertEqual(detail.status_code, 200)
+        self.assertEqual(detail.json()["tarea"]["titulo"], "Lectura de historia")
+        self.assertEqual(detail.json()["tarea"]["descripcion"], "Preparar el resumen del capítulo.")
+
     def test_edita_estado_prioridad_fecha_y_filtros(self):
         tarea = Tarea.objects.create(creador=self.alumno, titulo="Original")
         self.client.force_login(self.alumno)
