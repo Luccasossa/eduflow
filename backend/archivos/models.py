@@ -1,8 +1,17 @@
-from django.db import models
+import os
+import uuid
+
 from django.conf import settings
+from django.db import models
+from django.db.models import Q
+
+from .storage import PrivateFileSystemStorage
 
 def ruta_archivo_segura(instance, filename):
-    return f"archivos/{filename}"
+    # Never put the user supplied filename into the storage path. Keep only its
+    # extension so names cannot disclose private titles or collide.
+    extension = os.path.splitext(filename)[1].lower()
+    return f"archivos/{uuid.uuid4().hex}{extension}"
 
 class Carpeta(models.Model):
     nombre = models.CharField(max_length=150)
@@ -28,7 +37,14 @@ class Carpeta(models.Model):
 
 
 class Archivo(models.Model):
-    archivo = models.FileField(upload_to="archivos/")
+    archivo = models.FileField(
+        upload_to=ruta_archivo_segura,
+        storage=PrivateFileSystemStorage(),
+    )
+
+    nombre_original = models.CharField(max_length=255, default="")
+    tamano = models.PositiveBigIntegerField(default=0)
+    tipo = models.CharField(max_length=100, default="application/octet-stream")
 
     propietario = models.ForeignKey(
         settings.AUTH_USER_MODEL,
@@ -63,6 +79,7 @@ class Archivo(models.Model):
     )
 
     fecha_subida = models.DateTimeField(auto_now_add=True)
+    sha256 = models.CharField(max_length=64, blank=True, default="", db_index=True)
 
     def __str__(self):
         return self.archivo.name

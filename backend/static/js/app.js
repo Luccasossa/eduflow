@@ -17,9 +17,16 @@
     let editingProject = null;
     let academicFiles = [];
     let folders = [];
+    let fileFolders = {};
+    let fileManagement = {};
     let academicDocuments = [];
     let editingDocument = null;
     let documentConflictPending = false;
+    let documentConflictVersion = null;
+    let latestConflictDocument = null;
+    let documentSession = 0;
+    let documentListRequest = 0;
+    let documentSaveInFlight = false;
 
     async function api(url, method = "GET", data = undefined) {
         const options = { method, headers: { Accept: "application/json" } };
@@ -28,7 +35,12 @@
             options.headers["X-CSRFToken"] = csrf;
             options.body = JSON.stringify(data);
         }
-        const response = await fetch(url, options);
+        let response;
+        try {
+            response = await fetch(url, options);
+        } catch (_) {
+            throw new Error("No se pudo conectar con el servidor. Revisa tu conexión e inténtalo de nuevo.");
+        }
         let payload = {};
         try { payload = await response.json(); } catch (_) { /* respuesta vacía */ }
         if (response.redirected) {
@@ -36,7 +48,12 @@
             throw new Error("Tu sesión expiró. Inicia sesión de nuevo.");
         }
         if (!response.ok) {
-            const error = new Error(payload.error || "No se pudo completar la operación.");
+            const fallback = response.status === 401
+                ? "Tu sesi\u00f3n expir\u00f3. Inicia sesi\u00f3n de nuevo."
+                : response.status === 403
+                    ? "La solicitud fue rechazada por permisos o por la protecci\u00f3n CSRF."
+                    : "No se pudo completar la operaci\u00f3n.";
+            const error = new Error(payload.error || fallback);
             error.payload = payload;
             throw error;
         }
@@ -81,8 +98,12 @@
         const params = new URLSearchParams();
         if ($("#fileProjectFilter")?.value) params.set("proyecto", $("#fileProjectFilter").value);
         if ($("#fileFolderFilter")?.value) params.set("carpeta", $("#fileFolderFilter").value);
+        if ($("#fileSearchInput")?.value.trim()) params.set("buscar", $("#fileSearchInput").value.trim());
         try {
-            academicFiles = (await api(`/archivos/api/${params.size ? `?${params}` : ""}`)).archivos;
+            const result = await api(`/archivos/api/${params.size ? `?${params}` : ""}`);
+            academicFiles = result.archivos;
+            fileFolders = result.carpeta_por_archivo || {};
+            fileManagement = result.puede_administrar_por_archivo || {};
             renderFiles();
         } catch (error) { notify(error.message, true); }
     }
@@ -102,19 +123,147 @@
             card.appendChild(make("span", "", `${formatBytes(file.tamano)} · ${dateLabel(file.fecha_subida.slice(0, 10))}`));
             if (file.proyecto_id) card.appendChild(make("span", "", `Proyecto: ${projects.find((p) => p.id === file.proyecto_id)?.nombre || "Compartido"}`));
             const link = make("a", "text-button", "Descargar");
-            link.href = file.descarga;
-            link.setAttribute("aria-label", `Descargar ${file.nombre}`);
+            link.href = `${file.descarga}?inline=1`;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            link.setAttribute("aria-label", `Abrir ${file.nombre} en una pestaña nueva`);
             card.appendChild(link);
+            const folder = fileFolders[String(file.id)];
+            if (folder?.nombre) card.appendChild(make("span", "", `Carpeta: ${folder.nombre}`));
+            if (fileManagement[String(file.id)]) {
+            const moveTo = document.createElement("select");
+            moveTo.setAttribute("aria-label", `Mover ${file.nombre} a una carpeta`);
+            moveTo.add(new Option("Sin carpeta", ""));
+            folders.forEach((item) => moveTo.add(new Option(item.nombre, item.id)));
+            moveTo.value = folder?.id ? String(folder.id) : "";
+            const move = make("button", "text-button", "Mover");
+            move.type = "button";
+            move.addEventListener("click", async () => {
+                const body = new FormData(); body.append("carpeta", moveTo.value);
+                try {
+                    const response = await fetch(`/archivos/api/${file.id}/carpeta/`, { method: "POST", headers: { "X-CSRFToken": csrf, Accept: "application/json" }, body });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || "No se pudo mover el archivo.");
+                    notify("Archivo movido correctamente."); await loadFiles();
+                } catch (error) { notify(error.message, true); }
+            });
+            card.append(moveTo, move);
+            const remove = make("button", "text-button danger-text", "Eliminar");
+            remove.type = "button";
+            remove.addEventListener("click", async () => {
+                if (!window.confirm(`¿Eliminar ${file.nombre}?`)) return;
+                try {
+                    const response = await fetch(`/archivos/api/${file.id}/eliminar/`, { method: "DELETE", headers: { "X-CSRFToken": csrf, Accept: "application/json" } });
+                    const result = await response.json();
+                    if (!response.ok) throw new Error(result.error || "No se pudo eliminar el archivo.");
+                    notify("Archivo eliminado correctamente."); await loadFiles();
+                } catch (error) { notify(error.message, true); }
+            });
+            card.appendChild(remove);
+            }
             list.appendChild(card);
         });
         $("#storageUsage")?.replaceChildren(document.createTextNode(`${formatBytes(used)} en esta vista`));
     }
 
-    async function loadDocuments() {
+    async function attachExisting(endpoint) {
         try {
-            academicDocuments = (await api("/documentos/api/")).documentos;
-            renderDocuments();
+            const available = await api("/archivos/api/");
+            const files = available.archivos.filter((file) => available.puede_administrar_por_archivo?.[String(file.id)]);
+            if (!files.length) { notify("Primero sube archivos a tu biblioteca.", true); return; }
+            const choice = window.prompt(`Escribe uno o varios números separados por coma para adjuntar:\n${files.map((file, i) => `${i + 1}. ${file.nombre}`).join("\n")}`);
+            if (choice === null) return;
+            const selected = choice.split(",").map((item) => Number(item.trim()) - 1);
+            if (!selected.length || selected.some((index) => !files[index])) { notify("Selecciona números válidos.", true); return; }
+            const unique = [...new Set(selected)].map((index) => files[index]);
+            if (!window.confirm(`Adjuntar ${unique.length} archivo(s) seleccionado(s)?`)) return;
+            for (const file of unique) await api(endpoint, "POST", { archivo_id: file.id });
+            notify(unique.length === 1 ? "Archivo adjuntado correctamente." : "Archivos adjuntados correctamente.");
+            await Promise.all([loadTasks(), loadProjects()]);
+            loadActivity();
         } catch (error) { notify(error.message, true); }
+    }
+
+    function appendAttachments(container, files = [], endpoint = "") {
+        files.forEach((file) => {
+            const link = make("a", "text-button", `Abrir ${file.nombre}`);
+            link.href = file.abrir;
+            link.target = "_blank";
+            link.rel = "noopener noreferrer";
+            container.appendChild(link);
+            if (endpoint && file.puede_quitar) {
+                const remove = make("button", "text-button danger-text", "Quitar");
+                remove.type = "button";
+                remove.addEventListener("click", async () => {
+                    try { await api(endpoint, "DELETE", { archivo_id: file.id }); notify("Adjunto quitado."); await Promise.all([loadTasks(), loadProjects()]); }
+                    catch (error) { notify(error.message, true); }
+                });
+                container.appendChild(remove);
+            }
+        });
+    }
+
+    async function loadActivity() {
+        const list = $("#recentActivityList");
+        if (!list) return;
+        try {
+            const rows = (await api("/api/actividad/")).actividades;
+            list.replaceChildren();
+            if (!rows.length) { list.appendChild(make("p", "empty-state", "Todavía no hay actividad.")); return; }
+            rows.forEach((row) => {
+                const item = make("div", "activity");
+                item.appendChild(make("div", "activity-icon", "•"));
+                const info = make("div");
+                info.appendChild(make("strong", "", row.descripcion));
+                info.appendChild(make("small", "", `${row.tipo} · ${new Date(row.fecha).toLocaleString("es-AR")}`));
+                if (row.tarea_id) {
+                    const openTaskLink = make("button", "text-button", "Ver tarea");
+                    openTaskLink.type = "button";
+                    openTaskLink.addEventListener("click", () => openTaskInDashboard(row.tarea_id));
+                    info.appendChild(openTaskLink);
+                } else if (row.archivo_id) {
+                    const openFile = make("a", "text-button", "Abrir archivo");
+                    openFile.href = `/archivos/api/${row.archivo_id}/descargar/?inline=1`;
+                    openFile.target = "_blank";
+                    openFile.rel = "noopener noreferrer";
+                    info.appendChild(openFile);
+                } else if (row.proyecto_id) {
+                    info.appendChild(make("small", "", `Proyecto #${row.proyecto_id}`));
+                }
+                item.appendChild(info); list.appendChild(item);
+            });
+        } catch (error) { notify(error.message, true); }
+    }
+
+    async function loadNotifications(show = false) {
+        try {
+            const result = await api("/api/notificaciones/");
+            const dot = $("#notificationBtn .notification-dot");
+            if (dot) dot.hidden = result.no_leidas === 0;
+            if (!show) return;
+            const unread = result.notificaciones.filter((item) => !item.leida);
+            if (!unread.length) { notify("No tienes notificaciones nuevas."); return; }
+            const selected = window.prompt(`Notificaciones nuevas:\n${unread.map((item, i) => `${i + 1}. ${item.mensaje}`).join("\n")}\n\nEscribe un número para abrir la tarea relacionada.`);
+            await api("/api/notificaciones/", "PATCH", { ids: unread.map((item) => item.id) });
+            if (dot) dot.hidden = true;
+            const notification = unread[Number(selected) - 1];
+            const taskId = notification?.url.match(/\/tareas\/api\/(\d+)\//)?.[1];
+            if (taskId) {
+                openTaskInDashboard(taskId);
+            }
+        } catch (error) { notify(error.message, true); }
+    }
+
+    async function loadDocuments() {
+        const requestId = ++documentListRequest;
+        try {
+            const result = await api("/documentos/api/");
+            if (requestId !== documentListRequest) return;
+            academicDocuments = result.documentos;
+            renderDocuments();
+        } catch (error) {
+            if (requestId === documentListRequest) notify(error.message, true);
+        }
     }
 
     function renderDocuments() {
@@ -139,10 +288,8 @@
     }
 
     const documentModal = $("#documentModal");
-    function closeDocument() { documentModal?.classList.remove("show"); }
-    function openDocument(documento = null) {
+    function applyDocumentToEditor(documento) {
         editingDocument = documento;
-        documentConflictPending = false;
         $("#documentModalTitle").textContent = documento ? documento.titulo : "Nuevo documento";
         $("#documentTitleInput").value = documento?.titulo || "";
         $("#documentContentInput").value = documento?.contenido || "";
@@ -151,49 +298,119 @@
         $("#documentTitleInput").readOnly = Boolean(documento && !documento.puede_editar);
         $("#documentContentInput").readOnly = Boolean(documento && !documento.puede_editar);
         $("#saveDocumentBtn").hidden = Boolean(documento && !documento.puede_editar);
+        $("#saveDocumentBtn").disabled = documentSaveInFlight || Boolean(documento && !documento.puede_editar);
         $("#deleteDocumentBtn").hidden = !documento || !documento.puede_eliminar;
-        $("#documentVersionLabel").textContent = documento ? `Versión ${documento.version}` : "";
+        $("#deleteDocumentBtn").disabled = documentSaveInFlight;
+        $("#documentVersionLabel").textContent = documento ? `Version ${documento.version}` : "";
+    }
+
+    function closeDocument() {
+        documentSession += 1;
+        documentModal?.classList.remove("show");
+    }
+
+    async function openDocument(documento = null) {
+        const session = ++documentSession;
+        documentConflictPending = false;
+        documentConflictVersion = null;
+        latestConflictDocument = null;
         $("#documentFormError").textContent = "";
         $("#documentConflict").hidden = true;
+        $("#documentRestoreVersionBtn").hidden = true;
+        applyDocumentToEditor(documento ? { ...documento } : null);
         documentModal.classList.add("show");
+        if (!documento) return;
+
+        $("#saveDocumentBtn").disabled = true;
+        try {
+            const result = await api(`/documentos/api/${documento.id}/`);
+            if (session !== documentSession) return;
+            applyDocumentToEditor(result.documento);
+        } catch (error) {
+            if (session !== documentSession) return;
+            $("#saveDocumentBtn").hidden = true;
+            $("#documentFormError").textContent = error.message;
+        }
     }
 
     async function saveDocument() {
-        if (documentConflictPending && !window.confirm("¿Revisaste la versión guardada y quieres guardar el borrador actual sobre ella?")) return;
+        if (documentSaveInFlight || (editingDocument && !editingDocument.puede_editar)) return;
+        const session = documentSession;
+        const documentAtStart = editingDocument ? { ...editingDocument } : null;
+        let version = documentAtStart?.version;
+        if (documentConflictPending) {
+            if (!window.confirm("Revisaste la version guardada. Quieres guardar tu borrador sobre esa version?")) return;
+            version = documentConflictVersion;
+        }
         const payload = { titulo: $("#documentTitleInput").value.trim(), contenido: $("#documentContentInput").value };
         const project = $("#documentProjectInput").value;
-        if (!editingDocument && project) payload.proyecto = Number(project);
-        if (editingDocument) payload.version = editingDocument.version;
+        if (!documentAtStart && project) payload.proyecto = Number(project);
+        if (documentAtStart) payload.version = version;
+
+        documentSaveInFlight = true;
+        $("#saveDocumentBtn").disabled = true;
+        $("#deleteDocumentBtn").disabled = true;
         try {
-            const result = editingDocument
-                ? await api(`/documentos/api/${editingDocument.id}/`, "PATCH", payload)
-                : await api("/documentos/api/", "POST", payload);
-            closeDocument();
+            await (documentAtStart
+                ? api(`/documentos/api/${documentAtStart.id}/`, "PATCH", payload)
+                : api("/documentos/api/", "POST", payload));
             documentConflictPending = false;
+            documentConflictVersion = null;
+            latestConflictDocument = null;
             await loadDocuments();
+            if (session === documentSession && editingDocument?.id === documentAtStart?.id) closeDocument();
             notify("Documento guardado.");
         } catch (error) {
-            if (error.payload?.conflicto) {
+            if (session !== documentSession) return;
+            if (error.payload?.conflicto && error.payload.documento) {
+                latestConflictDocument = error.payload.documento;
+                documentConflictVersion = latestConflictDocument.version;
                 documentConflictPending = true;
-                editingDocument.version = error.payload.documento.version;
-                $("#documentVersionLabel").textContent = `Versión guardada ${editingDocument.version}`;
-                $("#documentConflictContent").textContent = error.payload.documento.contenido;
+                $("#documentVersionLabel").textContent = `Version guardada ${documentConflictVersion}`;
+                $("#documentConflictContent").textContent = `Titulo: ${latestConflictDocument.titulo}\n\n${latestConflictDocument.contenido}`;
                 $("#documentConflict").hidden = false;
-                $("#documentFormError").textContent = "Tu borrador sigue en el editor. Compara ambas versiones antes de guardar.";
+                $("#documentRestoreVersionBtn").hidden = false;
+                $("#documentFormError").textContent = "Tu borrador sigue en el editor. Compara ambas versiones o carga la guardada antes de decidir.";
             } else {
                 $("#documentFormError").textContent = error.message;
             }
+        } finally {
+            documentSaveInFlight = false;
+            $("#saveDocumentBtn").disabled = Boolean(editingDocument && !editingDocument.puede_editar);
+            $("#deleteDocumentBtn").disabled = false;
         }
     }
 
     async function deleteDocument() {
-        if (!editingDocument || !window.confirm(`¿Eliminar “${editingDocument.titulo}”?`)) return;
+        if (documentSaveInFlight || !editingDocument || !window.confirm(`Eliminar "${editingDocument.titulo}"?`)) return;
+        const session = documentSession;
+        const documentAtStart = { ...editingDocument };
+        documentSaveInFlight = true;
+        $("#deleteDocumentBtn").disabled = true;
+        $("#saveDocumentBtn").disabled = true;
         try {
-            await api(`/documentos/api/${editingDocument.id}/`, "DELETE", {});
-            closeDocument();
+            await api(`/documentos/api/${documentAtStart.id}/`, "DELETE", {});
             await loadDocuments();
+            if (session === documentSession && editingDocument?.id === documentAtStart.id) closeDocument();
             notify("Documento eliminado.");
-        } catch (error) { $("#documentFormError").textContent = error.message; }
+        } catch (error) {
+            if (session === documentSession) $("#documentFormError").textContent = error.message;
+        } finally {
+            documentSaveInFlight = false;
+            $("#saveDocumentBtn").disabled = Boolean(editingDocument && !editingDocument.puede_editar);
+            $("#deleteDocumentBtn").disabled = false;
+        }
+    }
+
+    function restoreLatestDocumentVersion() {
+        if (!latestConflictDocument || !window.confirm("Cargar la version del servidor y descartar el borrador actual?")) return;
+        applyDocumentToEditor(latestConflictDocument);
+        documentConflictPending = false;
+        documentConflictVersion = null;
+        latestConflictDocument = null;
+        $("#documentConflict").hidden = true;
+        $("#documentRestoreVersionBtn").hidden = true;
+        $("#documentFormError").textContent = "";
     }
 
     function make(tag, className, text) {
@@ -205,6 +422,13 @@
 
     function dateLabel(value) {
         return value ? new Date(`${value}T12:00:00`).toLocaleDateString("es-AR") : "Sin fecha de entrega";
+    }
+
+    function openTaskInDashboard(taskId) {
+        const projectTask = projects.some((project) => project.tareas.some((task) => task.id === Number(taskId)));
+        const section = projectTask ? "proyectos" : "tareas";
+        document.querySelector(`.nav-item[data-section="${section}"]`)?.click();
+        window.setTimeout(() => document.getElementById(`task-${taskId}`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 80);
     }
 
     // Navegación del dashboard existente.
@@ -236,8 +460,82 @@
 
     const taskModal = $("#taskModal");
     const projectModal = $("#projectModal");
+    const taskDetailModal = $("#taskDetailModal");
+    const projectDetailModal = $("#projectDetailModal");
     function closeTaskModal() { taskModal?.classList.remove("show"); }
     function closeProjectModal() { projectModal?.classList.remove("show"); }
+    function closeTaskDetail() { taskDetailModal?.classList.remove("show"); }
+    function closeProjectDetail() { projectDetailModal?.classList.remove("show"); }
+
+    async function openTaskDetails(taskId) {
+        try {
+            const task = (await api(`${taskUrl}${taskId}/`)).tarea;
+            const content = $("#taskDetailContent");
+            content.replaceChildren();
+            const taskTitle = make("h2", "", task.titulo);
+            taskTitle.id = "taskDetailTitle";
+            content.appendChild(taskTitle);
+            content.appendChild(make("p", "", task.descripcion || "Sin descripción."));
+            const project = projects.find((item) => item.id === task.proyecto_id);
+            content.appendChild(make("p", "", `Creada: ${dateLabel(task.fecha_creacion?.slice(0, 10))} · Entrega: ${dateLabel(task.fecha_vencimiento)} · Prioridad: ${task.prioridad} · Estado: ${states.find(([value]) => value === task.estado)?.[1] || task.estado}${project ? ` · Proyecto: ${project.nombre}` : ""}`));
+            content.appendChild(make("h3", "", "Archivos adjuntos"));
+            const files = make("div", "detail-attachments");
+            appendAttachments(files, task.archivos_adjuntos, `${taskUrl}${task.id}/archivos/`);
+            if (!task.archivos_adjuntos.length) files.appendChild(make("p", "empty-state", "No hay archivos adjuntos."));
+            content.appendChild(files);
+            const attach = make("button", "secondary-button", "Adjuntar archivos");
+            attach.type = "button";
+            attach.addEventListener("click", async () => { await attachExisting(`${taskUrl}${task.id}/archivos/`); await openTaskDetails(task.id); });
+            content.appendChild(attach);
+            content.appendChild(make("h3", "", "Devoluciones y calificaciones"));
+            if (!task.devoluciones.length) content.appendChild(make("p", "empty-state", "Todavía no hay devoluciones para esta tarea."));
+            task.devoluciones.forEach((entry) => {
+                const item = make("article", "project-feedback-entry");
+                item.appendChild(make("strong", "", `${entry.autor} · ${new Date(entry.fecha).toLocaleString("es-AR")}`));
+                if (entry.comentario) item.appendChild(make("p", "", entry.comentario));
+                if (entry.calificacion !== "") item.appendChild(make("p", "", `Calificación: ${entry.calificacion}/10`));
+                content.appendChild(item);
+            });
+            taskDetailModal.classList.add("show");
+        } catch (error) { notify(error.message, true); }
+    }
+
+    function openProjectDetails(project) {
+        const content = $("#projectDetailContent");
+        content.replaceChildren();
+        const projectTitle = make("h2", "", project.nombre);
+        projectTitle.id = "projectDetailTitle";
+        content.appendChild(projectTitle);
+        content.appendChild(make("p", "", project.descripcion || "Sin descripción."));
+        content.appendChild(make("p", "", `Entrega: ${dateLabel(project.fecha_entrega)} · Progreso: ${project.progreso}%`));
+        content.appendChild(make("p", "", `Integrantes: ${project.integrantes.map((member) => member.nombre).join(", ")}`));
+        content.appendChild(make("h3", "", "Archivos del proyecto"));
+        appendAttachments(content, project.archivos_adjuntos, project.puede_adjuntar ? `${projectUrl}${project.id}/archivos/` : "");
+        if (!project.archivos_adjuntos.length) content.appendChild(make("p", "empty-state", "No hay archivos adjuntos al proyecto."));
+        content.appendChild(make("h3", "", "Tareas del equipo"));
+        project.tareas.forEach((task) => {
+            const row = make("article", "project-feedback-entry");
+            row.appendChild(make("strong", "", task.titulo));
+            row.appendChild(make("p", "", `${task.estado} · ${task.prioridad} · Entrega: ${dateLabel(task.fecha_vencimiento)}`));
+            appendAttachments(row, task.archivos_adjuntos);
+            const open = make("button", "text-button", "Ver tarea");
+            open.type = "button";
+            open.addEventListener("click", () => { closeProjectDetail(); openTaskDetails(task.id); });
+            row.appendChild(open);
+            content.appendChild(row);
+        });
+        content.appendChild(make("h3", "", "Devoluciones generales del proyecto"));
+        const projectEntries = project.devoluciones.filter((entry) => !entry.tarea_id && !entry.documento_id);
+        if (!projectEntries.length) content.appendChild(make("p", "empty-state", "Todavía no hay devoluciones generales."));
+        projectEntries.forEach((entry) => {
+            const item = make("article", "project-feedback-entry");
+            item.appendChild(make("strong", "", `${entry.autor} · ${new Date(entry.fecha).toLocaleString("es-AR")}`));
+            if (entry.comentario) item.appendChild(make("p", "", entry.comentario));
+            if (entry.calificacion !== "") item.appendChild(make("p", "", `Calificación: ${entry.calificacion}/10`));
+            content.appendChild(item);
+        });
+        projectDetailModal.classList.add("show");
+    }
 
     function renderTasks() {
         const board = $("#personalKanban");
@@ -252,10 +550,14 @@
             if (!tasks.length) column.appendChild(make("p", "empty-state", "No hay tareas en este estado."));
             tasks.forEach((task) => {
                 const card = make("article", `kanban-card${state === "completada" ? " completed" : ""}`);
+                card.id = `task-${task.id}`;
                 card.appendChild(make("strong", "", task.titulo));
                 if (task.descripcion) card.appendChild(make("p", "", task.descripcion));
                 card.appendChild(make("span", "card-date", `${dateLabel(task.fecha_vencimiento)} · Prioridad ${task.prioridad}`));
                 const actions = make("div", "task-card-actions");
+                const view = make("button", "text-button", "Ver tarea");
+                view.type = "button";
+                view.addEventListener("click", () => openTaskDetails(task.id));
                 const stateSelect = document.createElement("select");
                 stateSelect.setAttribute("aria-label", `Estado de ${task.titulo}`);
                 states.forEach(([value, text]) => {
@@ -272,7 +574,12 @@
                 const remove = make("button", "text-button danger-text", "Eliminar");
                 remove.type = "button";
                 remove.addEventListener("click", () => deleteTask(task));
-                actions.append(stateSelect, edit, remove);
+                actions.append(view, stateSelect, edit, remove);
+                const attach = make("button", "text-button", "Adjuntar archivos");
+                attach.type = "button";
+                attach.addEventListener("click", () => attachExisting(`${taskUrl}${task.id}/archivos/`));
+                actions.appendChild(attach);
+                appendAttachments(card, task.archivos_adjuntos, `${taskUrl}${task.id}/archivos/`);
                 card.appendChild(actions);
                 column.appendChild(card);
             });
@@ -299,7 +606,6 @@
         }
         upcoming.forEach((task) => {
             const row = make("div", "task");
-            row.appendChild(make("div", "task-check", task.estado === "completada" ? "✓" : ""));
             const info = make("div", "task-info");
             info.appendChild(make("strong", "", task.titulo));
             info.appendChild(make("span", "", dateLabel(task.fecha_vencimiento)));
@@ -338,12 +644,22 @@
         $("#taskDescription").value = task?.descripcion || "";
         $("#taskDueDate").value = task?.fecha_vencimiento || "";
         $("#priorityInput").value = task?.prioridad || "media";
+        $("#priorityInput").disabled = true;
         $("#taskStateInput").value = task?.estado || "pendiente";
         $("#taskFormError").textContent = "";
         $("#deleteTaskBtn").hidden = !task;
         taskModal.classList.add("show");
         $("#taskInput").focus();
     }
+
+    $("#taskDueDate")?.addEventListener("change", () => {
+        const value = $("#taskDueDate").value;
+        if (!value) { $("#priorityInput").value = "media"; return; }
+        const today = new Date(); today.setHours(0, 0, 0, 0);
+        const due = new Date(`${value}T00:00:00`);
+        const days = Math.floor((due - today) / 86400000);
+        $("#priorityInput").value = days > 20 ? "baja" : days >= 5 ? "media" : "alta";
+    });
 
     async function saveTask() {
         const data = {
@@ -361,6 +677,7 @@
             closeTaskModal();
             await Promise.all([loadTasks(), loadProjects()]);
             notify(editingTask ? "Tarea actualizada." : "Tarea creada.");
+            loadActivity();
         } catch (error) { $("#taskFormError").textContent = error.message; }
     }
 
@@ -370,6 +687,7 @@
             await api(`${taskUrl}${task.id}/`, "DELETE", {});
             await Promise.all([loadTasks(), loadProjects()]);
             notify("Tarea eliminada.");
+            loadActivity();
         } catch (error) { notify(error.message, true); }
     }
 
@@ -382,6 +700,10 @@
             const card = make("article", "project-card");
             card.appendChild(make("div", "project-icon", "▣"));
             card.appendChild(make("h3", "", project.nombre));
+            const viewProject = make("button", "text-button", "Ver proyecto");
+            viewProject.type = "button";
+            viewProject.addEventListener("click", () => openProjectDetails(project));
+            card.appendChild(viewProject);
             card.appendChild(make("p", "", project.descripcion || "Sin descripción."));
             card.appendChild(make("p", "project-due-date", `Entrega: ${dateLabel(project.fecha_entrega)}`));
             const progress = make("div", "progress");
@@ -398,23 +720,106 @@
             addTask.type = "button";
             addTask.addEventListener("click", () => openTask(null, project.id));
             actions.appendChild(addTask);
-            if (project.puede_editar) {
+            if (project.puede_adjuntar) {
                 const edit = make("button", "text-button", "Editar proyecto");
                 edit.type = "button";
                 edit.addEventListener("click", () => openProject(project));
                 actions.appendChild(edit);
             }
             card.appendChild(actions);
+            appendAttachments(card, project.archivos_adjuntos, project.puede_adjuntar ? `${projectUrl}${project.id}/archivos/` : "");
+            if (project.puede_editar) {
+                const attachProject = make("button", "text-button", "Adjuntar archivos al proyecto");
+                attachProject.type = "button";
+                attachProject.addEventListener("click", () => attachExisting(`${projectUrl}${project.id}/archivos/`));
+                card.appendChild(attachProject);
+            }
 
             const taskList = make("div", "project-task-list");
             taskList.appendChild(make("h4", "", "Tareas del equipo"));
             if (!project.tareas.length) taskList.appendChild(make("p", "empty-state", "Todavía no hay tareas."));
             project.tareas.forEach((task) => {
                 const row = make("div", "project-task-row");
+                row.id = `task-${task.id}`;
                 const details = make("div");
                 details.appendChild(make("strong", "", task.titulo));
                 details.appendChild(make("small", "", `${states.find(([value]) => value === task.estado)?.[1] || task.estado} · ${task.prioridad} · ${dateLabel(task.fecha_vencimiento)}`));
                 row.appendChild(details);
+                const viewTask = make("button", "text-button", "Ver tarea");
+                viewTask.type = "button";
+                viewTask.addEventListener("click", () => openTaskDetails(task.id));
+                row.appendChild(viewTask);
+
+                const deliveryPanel = make("div", "group-delivery-panel");
+                deliveryPanel.appendChild(make("strong", "", "Entrega grupal"));
+                if (task.archivos_adjuntos?.length) {
+                    deliveryPanel.appendChild(make("strong", "", "Archivos adjuntos del alumno"));
+                    appendAttachments(deliveryPanel, task.archivos_adjuntos, `${taskUrl}${task.id}/archivos/`);
+                }
+                if (task.entregas?.length) {
+                    task.entregas.forEach((delivery) => {
+                        const info = make("p", "", `Entrega #${delivery.id} · ${delivery.alumno} · ${dateLabel(delivery.fecha_entrega.slice(0, 10))} · ${delivery.estado}`);
+                        deliveryPanel.appendChild(info);
+                        const download = make("a", "text-button", `Descargar ${delivery.nombre}`);
+                        download.href = delivery.descarga;
+                        deliveryPanel.appendChild(download);
+                        if (/\.(pdf|png|jpe?g)$/i.test(delivery.nombre)) {
+                            const preview = make("a", "text-button", "Abrir en el navegador");
+                            preview.href = `${delivery.descarga}?inline=1`;
+                            preview.target = "_blank";
+                            preview.rel = "noopener noreferrer";
+                            deliveryPanel.appendChild(preview);
+                        }
+                    });
+                    deliveryPanel.appendChild(make("small", "", "La entrega queda disponible para todo el grupo."));
+                } else {
+                    deliveryPanel.appendChild(make("p", "", "El grupo todavía no realizó la entrega."));
+                    const file = document.createElement("input");
+                    file.type = "file";
+                    file.accept = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg";
+                    file.setAttribute("aria-label", `Archivo para entregar: ${task.titulo}`);
+                    const submit = make("button", "text-button", "Entregar archivo por el grupo");
+                    submit.type = "button";
+                    submit.disabled = true;
+                    file.addEventListener("change", () => { submit.disabled = !file.files?.length; });
+                    submit.addEventListener("click", async () => {
+                        const uploaded = file.files?.[0];
+                        if (!uploaded) return;
+                        submit.disabled = true;
+                        try {
+                            const body = new FormData();
+                            body.append("archivo", uploaded);
+                            const response = await fetch(`${taskUrl}${task.id}/entregas/`, {
+                                method: "POST",
+                                headers: { Accept: "application/json", "X-CSRFToken": csrf },
+                                body,
+                            });
+                            let result = {};
+                            try { result = await response.json(); } catch (_) { /* error genérico */ }
+                            if (response.status === 409) {
+                                await loadProjects();
+                                notify(result.error || "El grupo ya realizó la entrega.", true);
+                                return;
+                            }
+                            if (!response.ok) throw new Error(result.error || "No se pudo entregar el archivo.");
+                            await loadProjects();
+                            notify("Entrega grupal registrada.");
+                        } catch (error) {
+                            notify(error.message, true);
+                            submit.disabled = !file.files?.length;
+                        }
+                    });
+                    deliveryPanel.append(file, submit);
+                }
+                if (task.evaluacion_grupal) {
+                    const evaluation = task.evaluacion_grupal;
+                    deliveryPanel.appendChild(make("p", "", `Evaluación grupal: ${evaluation.calificacion || "Sin nota"}${evaluation.comentario ? ` · ${evaluation.comentario}` : ""}`));
+                }
+                const personalEvaluation = task.evaluacion_individual;
+                if (personalEvaluation) {
+                    deliveryPanel.appendChild(make("p", "", `Tu evaluación individual: ${personalEvaluation.calificacion || "Sin nota"}${personalEvaluation.comentario ? ` · ${personalEvaluation.comentario}` : ""}`));
+                }
+                row.appendChild(deliveryPanel);
                 const editTask = make("button", "text-button", "Editar");
                 editTask.type = "button";
                 editTask.addEventListener("click", () => openTask(task));
@@ -422,11 +827,16 @@
                 taskList.appendChild(row);
             });
             card.appendChild(taskList);
-            if (project.devoluciones && project.devoluciones.length) {
+            const projectFeedback = project.devoluciones.filter((entry) => !entry.tarea_id && !entry.documento_id);
+            if (projectFeedback.length) {
                 const feedback = make("div", "project-feedback-history");
                 feedback.appendChild(make("h4", "", "Devoluciones docentes"));
-                project.devoluciones.forEach((entry) => {
+                projectFeedback.forEach((entry) => {
                     const item = make("article", "project-feedback-entry");
+                    const label = entry.tipo === "grupal" ? "Evaluación grupal"
+                        : entry.tipo === "individual" ? `Evaluación individual · ${entry.alumno}`
+                            : "Registro histórico";
+                    item.appendChild(make("strong", "", label));
                     item.appendChild(make("strong", "", `${entry.autor} · ${entry.fecha.slice(0, 10)}`));
                     if (entry.tarea || entry.documento) item.appendChild(make("small", "", `Sobre ${entry.tarea || entry.documento}`));
                     if (entry.comentario) item.appendChild(make("p", "", entry.comentario));
@@ -443,6 +853,15 @@
     async function loadProjects() {
         try {
             projects = (await api(projectUrl)).proyectos;
+            await Promise.all(projects.flatMap((project) => project.tareas.map(async (task) => {
+                const [deliveries, evaluations] = await Promise.all([
+                    api(`${taskUrl}${task.id}/entregas/`),
+                    api(`${taskUrl}${task.id}/evaluaciones/`),
+                ]);
+                task.entregas = deliveries.entregas;
+                task.evaluacion_grupal = evaluations.grupal;
+                task.evaluacion_individual = evaluations.individuales[0] || null;
+            })));
             renderProjects();
         } catch (error) { notify(error.message, true); }
     }
@@ -483,6 +902,7 @@
             closeProjectModal();
             await loadProjects();
             notify(editingProject ? "Proyecto actualizado." : "Proyecto creado.");
+            loadActivity();
         } catch (error) { $("#projectFormError").textContent = error.message; }
     }
 
@@ -506,6 +926,10 @@
     $$('[data-close-project]').forEach((button) => button.addEventListener("click", closeProjectModal));
     taskModal?.addEventListener("click", (event) => { if (event.target === taskModal) closeTaskModal(); });
     projectModal?.addEventListener("click", (event) => { if (event.target === projectModal) closeProjectModal(); });
+    taskDetailModal?.addEventListener("click", (event) => { if (event.target === taskDetailModal) closeTaskDetail(); });
+    projectDetailModal?.addEventListener("click", (event) => { if (event.target === projectDetailModal) closeProjectDetail(); });
+    $$('[data-close-task-detail]').forEach((button) => button.addEventListener("click", closeTaskDetail));
+    $$('[data-close-project-detail]').forEach((button) => button.addEventListener("click", closeProjectDetail));
     ["#filterTaskStatus", "#filterTaskPriority", "#filterTaskFrom", "#filterTaskTo"].forEach((selector) => {
         $(selector)?.addEventListener("change", loadTasks);
     });
@@ -513,7 +937,7 @@
         ["#filterTaskStatus", "#filterTaskPriority", "#filterTaskFrom", "#filterTaskTo"].forEach((selector) => { if ($(selector)) $(selector).value = ""; });
         loadTasks();
     });
-    $("#notificationBtn")?.addEventListener("click", () => notify("No tienes notificaciones nuevas."));
+    $("#notificationBtn")?.addEventListener("click", () => loadNotifications(true));
 
     $("#uploadFileBtn")?.addEventListener("click", () => $("#academicFileInput")?.click());
     $("#academicFileInput")?.addEventListener("change", async (event) => {
@@ -529,6 +953,7 @@
             if (!response.ok) throw new Error(result.error || "No se pudo subir el archivo.");
             notify("Archivo subido.");
             await loadFiles();
+            loadActivity();
         } catch (error) { notify(error.message, true); }
         event.target.value = "";
     });
@@ -538,6 +963,8 @@
         loadFiles();
     });
     $("#fileFolderFilter")?.addEventListener("change", loadFiles);
+    let fileSearchTimer;
+    $("#fileSearchInput")?.addEventListener("input", () => { clearTimeout(fileSearchTimer); fileSearchTimer = setTimeout(loadFiles, 180); });
     $("#newFolderBtn")?.addEventListener("click", async () => {
         const nombre = window.prompt("Nombre de la carpeta:")?.trim();
         if (!nombre) return;
@@ -550,11 +977,13 @@
             await loadFolders();
             $("#fileFolderFilter").value = String(result.carpeta.id);
             await loadFiles();
+            notify("Carpeta creada correctamente.");
         } catch (error) { notify(error.message, true); }
     });
     $("#newDocumentBtn")?.addEventListener("click", () => openDocument());
     $("#saveDocumentBtn")?.addEventListener("click", saveDocument);
     $("#deleteDocumentBtn")?.addEventListener("click", deleteDocument);
+    $("#documentRestoreVersionBtn")?.addEventListener("click", restoreLatestDocumentVersion);
     $$('[data-close-document]').forEach((button) => button.addEventListener("click", closeDocument));
     documentModal?.addEventListener("click", (event) => { if (event.target === documentModal) closeDocument(); });
 
@@ -568,6 +997,8 @@
         });
         loadFiles();
     });
-    loadFolders().catch((error) => notify(error.message, true));
+    loadFolders().then(loadFiles).catch((error) => notify(error.message, true));
     loadDocuments();
+    loadActivity();
+    loadNotifications();
 })();

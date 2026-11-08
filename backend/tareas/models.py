@@ -1,52 +1,10 @@
-
-from pathlib import Path
+from uuid import uuid4
 
 from django.conf import settings
-from django.core.exceptions import ValidationError
 from django.db import models
 
-
-# VALIDACIÓN DE ARCHIVOS
-
-MAX_FILE_SIZE = 10 * 1024 * 1024  # 10 MB
-
-ALLOWED_EXTENSIONS = {
-    ".pdf",
-    ".doc",
-    ".docx",
-    ".xls",
-    ".xlsx",
-    ".ppt",
-    ".pptx",
-    ".png",
-    ".jpg",
-    ".jpeg",
-}
-
-
-def validar_archivo(archivo):
-    if not archivo:
-        raise ValidationError(
-            "Debés seleccionar un archivo."
-        )
-
-    extension = Path(archivo.name).suffix.lower()
-
-    if extension not in ALLOWED_EXTENSIONS:
-        raise ValidationError(
-            "Formato no permitido. "
-            "Subí PDF, Word, Excel, PowerPoint o una imagen."
-        )
-
-    if archivo.size > MAX_FILE_SIZE:
-        raise ValidationError(
-            "El archivo no puede superar los 10 MB."
-        )
-
-    if archivo.size == 0:
-        raise ValidationError(
-            "El archivo está vacío."
-        )
+from archivos.storage import PrivateFileSystemStorage
+from archivos.validators import validar_archivo
 
 
 # MODELO DE TAREAS EXISTENTE
@@ -123,16 +81,20 @@ class Tarea(models.Model):
         auto_now_add=True,
     )
 
+    archivos_adjuntos = models.ManyToManyField("archivos.Archivo", blank=True, related_name="tareas_adjuntas")
+
     def __str__(self):
         return self.titulo
 
 
-# MODELO NUEVO: ENTREGAS DE LOS ALUMNOS
+# ENTREGA DE ARCHIVOS DE LOS ALUMNOS
 
 def ruta_entrega(instance, filename):
+    extension = filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    safe_name = f"{uuid4().hex}.{extension}" if extension else uuid4().hex
     return (
         f"entregas/tarea_{instance.tarea_id}/"
-        f"alumno_{instance.alumno_id}/{filename}"
+        f"alumno_{instance.alumno_id}/{safe_name}"
     )
 
 
@@ -158,6 +120,7 @@ class Entrega(models.Model):
     )
 
     archivo = models.FileField(
+        storage=PrivateFileSystemStorage(),
         upload_to=ruta_entrega,
         validators=[validar_archivo],
     )
