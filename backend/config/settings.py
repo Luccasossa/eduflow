@@ -16,6 +16,12 @@ from pathlib import Path
 from dotenv import load_dotenv
 from config.db_ssl import resolve_db_ssl_ca
 
+# Define la ruta base del proyecto
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Carga las variables desde el archivo .env
+load_dotenv(os.path.join(BASE_DIR, '.env'))  # <-- Añade esto
+
 # Build paths inside the project
 BASE_DIR = Path(__file__).resolve().parent.parent
 

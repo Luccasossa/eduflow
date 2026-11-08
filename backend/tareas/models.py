@@ -81,6 +81,8 @@ class Tarea(models.Model):
         auto_now_add=True,
     )
 
+    archivos_adjuntos = models.ManyToManyField("archivos.Archivo", blank=True, related_name="tareas_adjuntas")
+
     def __str__(self):
         return self.titulo
 

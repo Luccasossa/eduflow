@@ -3,6 +3,7 @@ import uuid
 
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 
 from .storage import PrivateFileSystemStorage
 
@@ -78,6 +79,7 @@ class Archivo(models.Model):
     )
 
     fecha_subida = models.DateTimeField(auto_now_add=True)
+    sha256 = models.CharField(max_length=64, blank=True, default="", db_index=True)
 
     def __str__(self):
         return self.archivo.name

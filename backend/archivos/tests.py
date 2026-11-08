@@ -50,6 +50,32 @@ class ArchivosTests(TestCase):
         self.assertEqual(descarga["X-Content-Type-Options"], "nosniff")
         descarga.close()
 
+    def test_hash_sha256_busqueda_parcial_y_borrado_seguro(self):
+        self.client.force_login(self.alumno)
+        first = self.upload("Apunte.pdf", b"%PDF-1.4\ncontenido A")
+        self.assertEqual(first.status_code, 201)
+        duplicate = self.upload("renombrado.pdf", b"%PDF-1.4\ncontenido A")
+        self.assertEqual(duplicate.status_code, 400)
+        self.assertEqual(duplicate.json()["error"], "Este archivo ya se encuentra en tus archivos.")
+        second = self.upload("Apunte-final.pdf", b"%PDF-1.4\ncontenido B")
+        self.assertEqual(second.status_code, 201)
+        folder = self.client.post(reverse("api_carpetas"), {"nombre": "Sistemas"}).json()["carpeta"]
+        move = self.client.post(reverse("mover_archivo", args=[first.json()["archivo"]["id"]]), {"carpeta": folder["id"]})
+        self.assertEqual(move.status_code, 200)
+        folder_map = self.client.get(reverse("api_archivos")).json()["carpeta_por_archivo"]
+        self.assertEqual(folder_map[str(first.json()["archivo"]["id"])]["nombre"], "Sistemas")
+        matches = self.client.get(reverse("api_archivos"), {"buscar": "APUNTE-f"}).json()["archivos"]
+        self.assertEqual([item["nombre"] for item in matches], ["Apunte-final.pdf"])
+
+        archivo = Archivo.objects.get(nombre_original="Apunte-final.pdf")
+        storage_name = archivo.archivo.name
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.delete(reverse("eliminar_archivo", args=[archivo.pk])).status_code, 404)
+        self.client.force_login(self.alumno)
+        self.assertEqual(self.client.delete(reverse("eliminar_archivo", args=[archivo.pk])).status_code, 200)
+        self.assertFalse(Archivo.objects.filter(pk=archivo.pk).exists())
+        self.assertFalse(self.file_field.storage.exists(storage_name))
+
     def test_rechaza_extension_y_contenido_invalidos(self):
         self.client.force_login(self.alumno)
         response = self.upload("virus.exe", b"MZ binary")
