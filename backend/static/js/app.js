@@ -478,6 +478,7 @@
     async function openTaskDetails(taskId) {
         try {
             const task = (await api(`${taskUrl}${taskId}/`)).tarea;
+            const deliveryResult = await api(`${taskUrl}${taskId}/entregas/`);
             const content = $("#taskDetailContent");
             content.replaceChildren();
             const taskTitle = make("h2", "", task.titulo);
@@ -491,6 +492,29 @@
             appendAttachments(files, task.archivos_adjuntos, `${taskUrl}${task.id}/archivos/`);
             if (!task.archivos_adjuntos.length) files.appendChild(make("p", "empty-state", "No hay archivos adjuntos."));
             content.appendChild(files);
+            content.appendChild(make("h3", "", "Entrega del alumno"));
+            if (deliveryResult.entregas.length) deliveryResult.entregas.forEach((delivery) => {
+                content.appendChild(make("p", "", `${delivery.estado} · ${new Date(delivery.fecha_entrega).toLocaleString("es-AR")}${delivery.observaciones ? ` · ${delivery.observaciones}` : ""}`));
+                const link = make("a", "text-button", `Descargar ${delivery.nombre}`); link.href = delivery.descarga; content.appendChild(link);
+                if (delivery.correccion) {
+                    const correction = delivery.correccion;
+                    content.appendChild(make("p", "", `Corrección: ${correction.estado} · ${new Date(correction.fecha).toLocaleString("es-AR")}`));
+                    if (correction.calificacion) content.appendChild(make("p", "", `Calificación: ${correction.calificacion}/${document.body.dataset.gradeMax}`));
+                    if (correction.comentario) content.appendChild(make("p", "", correction.comentario));
+                } else content.appendChild(make("p", "empty-state", "La entrega aún no tiene devolución docente."));
+            });
+            else if (task.puede_entregar) {
+                const submit = make("form", "detail-delivery-form"), file = document.createElement("input"), note = document.createElement("textarea"), button = make("button", "primary-button", "Enviar entrega");
+                file.type = "file"; file.required = true; note.placeholder = "Observaciones (opcional)"; note.maxLength = 20000; button.type = "submit";
+                submit.append(file, note, button);
+                submit.addEventListener("submit", async (event) => {
+                    event.preventDefault(); if (!file.files.length) return;
+                    const data = new FormData(); data.append("archivo", file.files[0]); data.append("observaciones", note.value);
+                    try { await fetch(`${taskUrl}${task.id}/entregas/`, {method:"POST", headers:{"X-CSRFToken":csrf, Accept:"application/json"}, body:data}).then(async (response) => { const result=await response.json(); if(!response.ok) throw new Error(result.error || "No se pudo enviar la entrega."); return result; }); await openTaskDetails(task.id); notify("Entrega enviada."); }
+                    catch(error) { notify(error.message, true); }
+                });
+                content.appendChild(submit);
+            } else content.appendChild(make("p", "empty-state", "No hay una entrega registrada."));
             if (task.puede_adjuntar) {
                 const attach = make("button", "secondary-button", "Adjuntar archivos");
                 attach.type = "button";
@@ -584,7 +608,8 @@
                 const remove = make("button", "text-button danger-text", "Eliminar");
                 remove.type = "button";
                 remove.addEventListener("click", () => deleteTask(task));
-                actions.append(view, stateSelect, edit, remove);
+                actions.append(view, stateSelect);
+                if (task.puede_editar !== false) actions.append(edit, remove);
                 if (task.puede_adjuntar) {
                     const attach = make("button", "text-button", "Adjuntar archivos");
                     attach.type = "button";

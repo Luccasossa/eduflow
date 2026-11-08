@@ -1245,6 +1245,7 @@ nav {
             <a href="#proyectos" class="nav-item" data-section="proyectos" data-title="Proyectos de Alumnos">
                 <span aria-hidden="true">📊</span> Proyectos de Alumnos
             </a>
+            <a href="#tareas-alumnos" class="nav-item" data-section="tareas-alumnos" data-title="Tareas de alumnos"><span aria-hidden="true">&#128218;</span> Tareas de alumnos</a>
             <a href="#revisiones" class="nav-item" data-section="revisiones" data-title="Entregas y Revisiones">
                 <span aria-hidden="true">&#128229;</span> Entregas y revisiones
             </a>
@@ -1396,6 +1397,20 @@ nav {
             </div>
         </section>
 
+
+        <section id="tareas-alumnos" class="section" hidden>
+            <div class="section-header"><div><h2>Tareas de alumnos</h2><p>Asigná tareas individuales y revisá sus entregas. Las tareas de proyectos siguen en Proyectos de Alumnos.</p></div></div>
+            <form id="teacherTaskAssignmentForm" class="teacher-summary-card" style="margin-bottom:20px">
+                <h3>Asignar tarea individual</h3>
+                <label>Alumno<select id="assignedStudent" required><option value="">Seleccioná un alumno</option></select></label>
+                <label>Nombre<input id="assignedTaskTitle" maxlength="150" required></label>
+                <label>Descripción<textarea id="assignedTaskDescription" maxlength="20000" rows="3"></textarea></label>
+                <label>Fecha de entrega<input id="assignedTaskDue" type="date"></label>
+                <p id="assignmentError" class="form-error" role="alert"></p>
+                <button class="primary-button" type="submit">Asignar tarea</button>
+            </form>
+            <div id="studentTaskAssignmentList" class="review-queue" aria-live="polite"><p class="muted">Cargando tareas…</p></div>
+        </section>
 
         <!-- DOCUMENTOS GENERALES -->
         <section id="documentos" class="section" hidden>
@@ -1778,6 +1793,90 @@ nav {
             });
         });
         showSection(location.hash.replace('#', '') || 'inicio');
+    }
+
+    function loadStudentTaskAssignments() {
+        var list = $('studentTaskAssignmentList');
+        if (!list) return Promise.resolve();
+        list.replaceChildren(el('p', 'muted', 'Cargando asignaciones…'));
+        return Promise.all([
+            requestJson('/tareas/api/asignaciones/'),
+            requestJson('/tareas/api/alumnos-asignables/')
+        ]).then(function (results) {
+            var select = $('assignedStudent');
+            select.replaceChildren(new Option('Seleccioná un alumno', ''));
+            results[1].alumnos.forEach(function (student) { select.add(new Option(student.nombre, student.id)); });
+            list.replaceChildren();
+            if (!results[0].asignaciones.length) list.appendChild(el('p', 'muted', 'Todavía no asignaste tareas individuales.'));
+            results[0].asignaciones.forEach(function (assignment) {
+                var card = el('article', 'teacher-summary-card');
+                card.appendChild(el('h3', '', assignment.titulo));
+                card.appendChild(el('p', '', 'Alumno: ' + assignment.alumno + ' · Materia: no definida en el perfil actual'));
+                card.appendChild(el('p', '', assignment.descripcion || 'Sin descripción.'));
+                card.appendChild(el('p', '', 'Fecha de entrega: ' + (assignment.fecha_vencimiento || 'Sin fecha') + ' · Estado: ' + assignment.estado));
+                if (!assignment.entregas.length) card.appendChild(el('p', 'empty-state', 'El alumno todavía no entregó esta tarea.'));
+                assignment.entregas.forEach(function (delivery) {
+                    var submission = el('div', 'project-feedback-entry');
+                    submission.appendChild(el('strong', '', 'Entrega de ' + delivery.alumno + ' · ' + new Date(delivery.fecha_entrega).toLocaleString('es-AR')));
+                    submission.appendChild(el('p', '', 'Estado: ' + delivery.estado + (delivery.observaciones ? ' · ' + delivery.observaciones : '')));
+                    var download = el('a', 'text-button', 'Descargar ' + delivery.nombre); download.href = delivery.descarga; submission.appendChild(download);
+                    if (/\.(pdf|png|jpe?g)$/i.test(delivery.nombre)) { var preview = el('a', 'text-button', 'Abrir archivo'); preview.href = delivery.descarga + '?inline=1'; preview.target = '_blank'; preview.rel = 'noopener noreferrer'; submission.appendChild(preview); }
+                    var correction = delivery.correccion;
+                    if (correction) {
+                        submission.appendChild(el('p', '', 'Corrección vigente · ' + correction.estado + ' · ' + new Date(correction.fecha).toLocaleString('es-AR')));
+                        if (correction.calificacion !== '') submission.appendChild(el('p', '', 'Calificación: ' + correction.calificacion + '/' + document.body.dataset.gradeMax));
+                        if (correction.comentario) submission.appendChild(el('p', '', correction.comentario));
+                    }
+                    var form = el('form', 'teacher-evaluation-form');
+                    var gradeLabel = el('label', '', 'Calificación (opcional)');
+                    var grade = document.createElement('input'); grade.type = 'number'; grade.min = '0'; grade.max = document.body.dataset.gradeMax; grade.step = '0.01'; grade.value = correction ? correction.calificacion : ''; gradeLabel.appendChild(grade);
+                    var commentLabel = el('label', '', 'Comentario (opcional)');
+                    var comment = document.createElement('textarea'); comment.maxLength = 20000; comment.rows = 3; comment.value = correction ? correction.comentario : ''; commentLabel.appendChild(comment);
+                    var stateLabel = el('label', '', 'Estado de corrección');
+                    var status = document.createElement('select');
+                    [['corregida','Corregida'],['devuelta','Devuelta para correcciones'],['en_revision','En revisión']].forEach(function (option) { status.add(new Option(option[1], option[0], false, correction ? correction.estado === option[0] : option[0] === 'corregida')); }); stateLabel.appendChild(status);
+                    var error = el('p', 'form-error', '');
+                    var save = el('button', 'primary-button', correction ? 'Guardar cambios' : 'Guardar corrección'); save.type = 'submit';
+                    form.append(gradeLabel, commentLabel, stateLabel, error, save);
+                    form.addEventListener('submit', function (event) {
+                        event.preventDefault(); error.textContent = '';
+                        var payload = {calificacion: grade.value, comentario: comment.value.trim(), estado: status.value};
+                        var method = correction ? 'PUT' : 'POST';
+                        requestJson('/tareas/entregas/' + delivery.id + '/correccion/', {method: method, headers: {'Content-Type':'application/json','X-CSRFToken':csrfToken()}, body: JSON.stringify(payload)})
+                            .then(function () { return loadStudentTaskAssignments(); }).then(function () { toast('Corrección guardada.'); })
+                            .catch(function (err) { error.textContent = err.message; });
+                    });
+                    submission.appendChild(form);
+                    if (correction) {
+                        var remove = el('button', 'text-button danger-text', 'Eliminar corrección'); remove.type = 'button';
+                        remove.addEventListener('click', function () {
+                            if (!window.confirm('¿Eliminar la corrección vigente?')) return;
+                            requestJson('/tareas/entregas/' + delivery.id + '/correccion/', {method:'DELETE', headers:{'X-CSRFToken':csrfToken()}})
+                                .then(function () { return loadStudentTaskAssignments(); }).then(function () { toast('Corrección eliminada.'); })
+                                .catch(function (err) { toast(err.message); });
+                        });
+                        submission.appendChild(remove);
+                    }
+                    card.appendChild(submission);
+                });
+                list.appendChild(card);
+            });
+        }).catch(function (error) { list.replaceChildren(el('p', 'form-error', error.message)); });
+    }
+
+    function initStudentTaskAssignments() {
+        var form = $('teacherTaskAssignmentForm');
+        if (!form) return;
+        form.addEventListener('submit', function (event) {
+            event.preventDefault();
+            var error = $('assignmentError'); error.textContent = '';
+            var payload = {alumno_id:$('assignedStudent').value, titulo:$('assignedTaskTitle').value.trim(), descripcion:$('assignedTaskDescription').value.trim(), fecha_vencimiento:$('assignedTaskDue').value};
+            requestJson('/tareas/api/asignaciones/', {method:'POST', headers:{'Content-Type':'application/json','X-CSRFToken':csrfToken()}, body:JSON.stringify(payload)})
+                .then(function () { form.reset(); return loadStudentTaskAssignments(); }).then(function () { toast('Tarea asignada.'); })
+                .catch(function (err) { error.textContent = err.message; });
+        });
+        document.querySelector('.nav-item[data-section="tareas-alumnos"]').addEventListener('click', loadStudentTaskAssignments);
+        loadStudentTaskAssignments();
     }
 
     /* ---------- Inicio ---------- */
@@ -2701,6 +2800,7 @@ nav {
         initTeacherDocuments();
         initKanban();
         initProjectEvaluation();
+        initStudentTaskAssignments();
         initFeedback();
         initModals();
         initMisc();

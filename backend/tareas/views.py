@@ -15,7 +15,7 @@ from django.conf import settings
 from proyectos.models import Proyecto
 from proyectos.models import DevolucionDocente
 from proyectos.permissions import profesor_autorizado
-from .models import Entrega, Tarea
+from .models import AsignacionTarea, CorreccionEntrega, Entrega, Tarea
 from .prioridad import prioridad_para, sincronizar_prioridades
 
 
@@ -81,6 +81,8 @@ def _serializar(tarea, usuario=None):
         "fecha_vencimiento": tarea.fecha_vencimiento.isoformat() if tarea.fecha_vencimiento else "",
         "proyecto_id": tarea.proyecto_id,
         "puede_adjuntar": bool(usuario and _rol(usuario) == "alumno" and (tarea.creador_id == usuario.pk or tarea.proyecto_id and (tarea.proyecto.creador_id == usuario.pk or tarea.proyecto.integrantes.filter(pk=usuario.pk).exists()))),
+        "puede_editar": bool(usuario and _rol(usuario) == "alumno" and (tarea.creador_id == usuario.pk or tarea.proyecto_id and (tarea.proyecto.creador_id == usuario.pk or tarea.proyecto.integrantes.filter(pk=usuario.pk).exists())) and not tarea.asignaciones.exists()),
+        "puede_entregar": bool(usuario and _rol(usuario) == "alumno" and tarea.proyecto_id is None and tarea.asignaciones.filter(alumno=usuario).exists() and not tarea.entregas.filter(alumno=usuario).exists()),
         "calificacion": str(tarea.calificacion) if tarea.calificacion is not None else "",
         "retroalimentacion": tarea.retroalimentacion,
         "archivos_adjuntos": [
@@ -110,7 +112,9 @@ def _tarea_autorizada(request, pk):
     tarea = get_object_or_404(Tarea.objects.select_related("proyecto", "creador"), pk=pk)
     rol = _rol(request.user)
     if tarea.proyecto_id is None:
-        if rol == "alumno" and tarea.creador_id == request.user.id:
+        if rol == "alumno" and (tarea.creador_id == request.user.id or tarea.asignaciones.filter(alumno=request.user).exists()):
+            return tarea
+        if rol == "profesor" and tarea.asignaciones.filter(profesor=request.user).exists():
             return tarea
     elif (rol == "profesor" and profesor_autorizado(request.user, tarea.proyecto)) or (
         rol == "alumno"
@@ -152,7 +156,7 @@ def api_tareas(request):
                 raise Http404
             tareas = Tarea.objects.filter(proyecto=proyecto)
         elif rol == "alumno":
-            tareas = Tarea.objects.filter(creador=request.user, proyecto__isnull=True)
+            tareas = Tarea.objects.filter(Q(creador=request.user) | Q(asignaciones__alumno=request.user), proyecto__isnull=True).distinct()
         else:
             tareas = Tarea.objects.filter(proyecto__isnull=False)
             if not request.user.is_superuser:
@@ -209,6 +213,57 @@ def api_tareas(request):
 
 
 @login_required
+@require_http_methods(["GET", "POST"])
+def api_asignaciones(request):
+    """Teacher task assignments and deliveries; project tasks stay in project review."""
+    if _rol(request.user) != "profesor":
+        return JsonResponse({"error": "Solo los docentes pueden gestionar asignaciones."}, status=403)
+    if request.method == "GET":
+        assignments = AsignacionTarea.objects.filter(profesor=request.user, tarea__proyecto__isnull=True).select_related("tarea", "alumno").prefetch_related("tarea__entregas__correcciones")
+        rows = []
+        for assignment in assignments.order_by("-fecha_asignacion", "-pk"):
+            deliveries = assignment.tarea.entregas.filter(alumno=assignment.alumno).select_related("alumno")
+            rows.append({
+                "id": assignment.pk, "tarea_id": assignment.tarea_id,
+                "titulo": assignment.tarea.titulo, "descripcion": assignment.tarea.descripcion,
+                "fecha_vencimiento": assignment.tarea.fecha_vencimiento.isoformat() if assignment.tarea.fecha_vencimiento else "",
+                "estado": assignment.tarea.estado, "alumno_id": assignment.alumno_id,
+                "alumno": assignment.alumno.get_full_name() or assignment.alumno.dni,
+                "entregas": [_serializar_entrega(delivery) for delivery in deliveries],
+            })
+        return JsonResponse({"asignaciones": rows})
+
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON válido."}, status=400)
+    from usuarios.models import Usuario
+    alumno = get_object_or_404(Usuario.objects.filter(perfil__rol="alumno", is_active=True), pk=data.get("alumno_id"))
+    try:
+        fields = _validar_campos(data)
+    except ValueError as exc:
+        return JsonResponse({"error": str(exc)}, status=400)
+    with transaction.atomic():
+        tarea = Tarea.objects.create(creador=request.user, proyecto=None, **fields)
+        assignment = AsignacionTarea(tarea=tarea, alumno=alumno, profesor=request.user)
+        try:
+            assignment.full_clean()
+            assignment.save()
+        except ValidationError:
+            tarea.delete()
+            return JsonResponse({"error": "No se pudo validar la asignación de la tarea."}, status=400)
+    return JsonResponse({"asignacion": {"id": assignment.pk, "tarea_id": tarea.pk, "alumno": alumno.get_full_name() or alumno.dni, "titulo": tarea.titulo}}, status=201)
+
+
+@login_required
+@require_http_methods(["GET"])
+def api_alumnos_asignables(request):
+    if _rol(request.user) != "profesor":
+        return JsonResponse({"error": "Solo los docentes pueden consultar alumnos."}, status=403)
+    from usuarios.models import Usuario
+    return JsonResponse({"alumnos": [{"id": user.pk, "nombre": user.get_full_name() or user.dni} for user in Usuario.objects.filter(perfil__rol="alumno", is_active=True).order_by("first_name", "last_name", "dni")]})
+
+
+@login_required
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def api_tarea(request, pk):
     tarea = _tarea_autorizada(request, pk)
@@ -218,6 +273,8 @@ def api_tarea(request, pk):
     if rol != "alumno":
         return JsonResponse({"error": "Los profesores solo pueden revisar y calificar tareas."}, status=403)
     if request.method == "DELETE":
+        if tarea.proyecto_id is None and tarea.asignaciones.filter(alumno=request.user).exists():
+            return JsonResponse({"error": "No puedes eliminar una tarea asignada por tu docente."}, status=403)
         proyecto = tarea.proyecto
         with transaction.atomic():
             tarea.delete()
@@ -227,6 +284,9 @@ def api_tarea(request, pk):
     data = _json_body(request)
     if data is None:
         return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON válido."}, status=400)
+    assigned_task = tarea.proyecto_id is None and tarea.asignaciones.filter(alumno=request.user).exists()
+    if assigned_task and set(data) - {"estado"}:
+        return JsonResponse({"error": "No puedes editar los datos de una tarea asignada."}, status=403)
     try:
         fields = _validar_campos(data, tarea)
     except ValueError as exc:
@@ -329,6 +389,7 @@ def api_archivos_tarea(request, pk):
 
 
 def _serializar_entrega(entrega):
+    correction = entrega.correcciones.filter(anulada_en__isnull=True).select_related("profesor").order_by("-fecha_correccion", "-pk").first()
     return {
         "id": entrega.pk,
         "tarea_id": entrega.tarea_id,
@@ -340,7 +401,71 @@ def _serializar_entrega(entrega):
         "estado": entrega.estado,
         "observaciones": entrega.observaciones,
         "descarga": f"/tareas/entregas/{entrega.pk}/descargar/",
+        "correccion": _serializar_correccion(correction) if correction else None,
     }
+
+
+def _serializar_correccion(item):
+    return {"id": item.pk, "calificacion": str(item.calificacion) if item.calificacion is not None else "", "comentario": item.comentario,
+            "estado": item.estado, "profesor": item.profesor.get_full_name() or item.profesor.dni,
+            "fecha": item.fecha_correccion.isoformat()}
+
+
+@login_required
+@require_http_methods(["GET", "POST", "PUT", "DELETE"])
+@_manejar_conflicto_concurrencia
+def api_correccion_entrega(request, pk):
+    entrega = get_object_or_404(Entrega.objects.select_related("tarea", "alumno"), pk=pk, tarea__proyecto__isnull=True)
+    assignment = AsignacionTarea.objects.filter(tarea=entrega.tarea, alumno=entrega.alumno).first()
+    if not assignment or not (
+        (_rol(request.user) == "profesor" and assignment.profesor_id == request.user.pk)
+        or (_rol(request.user) == "alumno" and entrega.alumno_id == request.user.pk)
+    ):
+        raise Http404
+    corrections = CorreccionEntrega.objects.filter(entrega=entrega, anulada_en__isnull=True).select_related("profesor").order_by("-fecha_correccion", "-pk")
+    current = corrections.first()
+    if request.method == "GET":
+        return JsonResponse({"correccion": _serializar_correccion(current) if current else None,
+                             "historial": [_serializar_correccion(item) for item in entrega.correcciones.select_related("profesor").order_by("fecha_correccion", "pk")] if _rol(request.user) == "profesor" else []})
+    if _rol(request.user) != "profesor":
+        return JsonResponse({"error": "Solo el docente asignado puede corregir esta entrega."}, status=403)
+    if request.method == "DELETE":
+        if not current:
+            raise Http404
+        current.anulada_en, current.anulada_por = timezone.now(), request.user
+        current.save(update_fields=("anulada_en", "anulada_por"))
+        entrega.estado = "entregada"
+        entrega.save(update_fields=("estado",))
+        return JsonResponse({"eliminada": True})
+    data = _json_body(request)
+    if data is None:
+        return JsonResponse({"error": "El cuerpo de la solicitud debe ser JSON válido."}, status=400)
+    try:
+        raw_grade = data.get("calificacion", "")
+        grade = None if raw_grade in (None, "") else forms.DecimalField(max_digits=5, decimal_places=2, min_value=0, max_value=settings.EDUFLOW_GRADE_MAX).clean(raw_grade)
+        comment = data.get("comentario", "")
+        state = data.get("estado", "corregida")
+        if not isinstance(comment, str) or len(comment) > 20000 or state not in dict(CorreccionEntrega.ESTADOS) or (grade is None and not comment.strip()):
+            raise ValueError
+    except (ValidationError, TypeError, ValueError):
+        return JsonResponse({"error": "Indica una nota o un comentario válido y un estado permitido."}, status=400)
+    with transaction.atomic():
+        if current:
+            current.anulada_en, current.anulada_por = timezone.now(), request.user
+            current.save(update_fields=("anulada_en", "anulada_por"))
+        correction = CorreccionEntrega(entrega=entrega, profesor=request.user, calificacion=grade,
+                                       comentario=comment.strip(), estado=state, reemplaza=current)
+        correction.full_clean()
+        correction.save()
+        entrega.estado = {"en_revision": "en_revision", "corregida": "aprobada", "devuelta": "rechazada"}[state]
+        entrega.save(update_fields=("estado",))
+        from core.models import Actividad, Notificacion
+        message = f"El docente publicó una devolución para tu tarea {entrega.tarea.titulo}."
+        if grade is not None:
+            message = f"Tu tarea {entrega.tarea.titulo} fue calificada: {grade}."
+        Notificacion.objects.create(usuario=entrega.alumno, tarea=entrega.tarea, tipo="calificacion" if grade is not None else "comentario", mensaje=message)
+        Actividad.objects.create(usuario=entrega.alumno, tarea=entrega.tarea, tipo="calificacion" if grade is not None else "comentario", descripcion=message)
+    return JsonResponse({"correccion": _serializar_correccion(correction)}, status=201)
 
 
 def _serializar_evaluacion(evaluacion, usuario=None):
@@ -580,15 +705,17 @@ def descargar_entrega(request, pk):
     rol = _rol(request.user)
     autorizado = (
         rol == "alumno" and (
-            (tarea.proyecto_id is None and entrega.alumno_id == request.user.id)
+            (tarea.proyecto_id is None and entrega.alumno_id == request.user.id and (tarea.creador_id == request.user.id or AsignacionTarea.objects.filter(tarea=tarea, alumno=request.user).exists()))
             or (tarea.proyecto_id is not None and (
             tarea.proyecto.creador_id == request.user.id
             or tarea.proyecto.integrantes.filter(pk=request.user.pk).exists()
             ))
         )
     ) or (
-        rol == "profesor" and tarea.proyecto_id is not None
-        and profesor_autorizado(request.user, tarea.proyecto)
+        rol == "profesor" and (
+            (tarea.proyecto_id is not None and profesor_autorizado(request.user, tarea.proyecto))
+            or (tarea.proyecto_id is None and AsignacionTarea.objects.filter(tarea=tarea, alumno=entrega.alumno, profesor=request.user).exists())
+        )
     )
     if not autorizado:
         raise Http404

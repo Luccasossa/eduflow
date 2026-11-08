@@ -13,7 +13,7 @@ from django.utils import timezone
 
 from proyectos.models import Proyecto
 from usuarios.models import PerfilUsuario
-from .models import Entrega, Tarea
+from .models import AsignacionTarea, CorreccionEntrega, Entrega, Tarea
 
 Usuario = get_user_model()
 
@@ -620,6 +620,50 @@ class TablerosTests(TestCase):
         csrf_client.force_login(self.profesor)
         response = csrf_client.post(url, data=json.dumps({"calificacion": 8}), content_type="application/json")
         self.assertEqual(response.status_code, 403)
+
+    def test_asignacion_individual_entrega_correccion_edicion_anulacion_y_permisos(self):
+        url = reverse("api_asignaciones")
+        self.client.force_login(self.profesor)
+        assigned = self.json_post(url, {"alumno_id": self.alumno.pk, "titulo": "Ensayo", "descripcion": "Argumentar", "fecha_vencimiento": "2026-11-20"})
+        self.assertEqual(assigned.status_code, 201, assigned.content)
+        tarea = Tarea.objects.get(pk=assigned.json()["asignacion"]["tarea_id"])
+        self.assertEqual(AsignacionTarea.objects.get(tarea=tarea).profesor, self.profesor)
+
+        student_client = Client()
+        student_client.force_login(self.alumno)
+        self.assertEqual([row["id"] for row in student_client.get(reverse("api_tareas")).json()["tareas"]], [tarea.pk])
+        self.assertEqual(student_client.patch(reverse("api_tarea", args=[tarea.pk]), data=json.dumps({"titulo": "Alterada"}), content_type="application/json").status_code, 403)
+        self.assertEqual(student_client.delete(reverse("api_tarea", args=[tarea.pk])).status_code, 403)
+        delivery_response = student_client.post(reverse("api_entregas", args=[tarea.pk]), {"archivo": SimpleUploadedFile("trabajo.pdf", b"%PDF-1.7 entrega"), "observaciones": "Entrega final"})
+        self.assertEqual(delivery_response.status_code, 201, delivery_response.content)
+        delivery_id = delivery_response.json()["entrega"]["id"]
+        delivery = Entrega.objects.get(pk=delivery_id)
+
+        queue = self.client.get(url)
+        self.assertEqual(queue.status_code, 200)
+        self.assertEqual(queue.json()["asignaciones"][0]["entregas"][0]["alumno_id"], self.alumno.pk)
+        correction_url = reverse("api_correccion_entrega", args=[delivery_id])
+        grade = self.json_post(correction_url, {"calificacion": "8.50"})
+        self.assertEqual(grade.status_code, 201, grade.content)
+        delivery.refresh_from_db()
+        self.assertEqual(delivery.estado, "aprobada")
+        visible = student_client.get(correction_url).json()["correccion"]
+        self.assertEqual(visible["calificacion"], "8.50")
+        self.assertEqual(visible["comentario"], "")
+
+        edited = self.client.put(correction_url, data=json.dumps({"comentario": "Revisar la conclusión", "estado": "devuelta"}), content_type="application/json")
+        self.assertEqual(edited.status_code, 201, edited.content)
+        visible = student_client.get(correction_url).json()["correccion"]
+        self.assertEqual(visible["calificacion"], "")
+        self.assertEqual(visible["comentario"], "Revisar la conclusión")
+        self.assertEqual(Entrega.objects.get(pk=delivery_id).estado, "rechazada")
+
+        self.assertEqual(self.client.delete(correction_url).status_code, 200)
+        self.assertIsNone(student_client.get(correction_url).json()["correccion"])
+        self.assertEqual(Entrega.objects.get(pk=delivery_id).estado, "entregada")
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.get(reverse("api_tarea", args=[tarea.pk])).status_code, 404)
+        self.assertEqual(self.client.get(correction_url).status_code, 404)
 
 
 class EntregaConcurrenteTests(TransactionTestCase):
