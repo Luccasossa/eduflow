@@ -64,6 +64,8 @@ def _fecha(value):
 
 
 def _serializar(tarea, usuario=None):
+    from archivos.models import Archivo
+
     sincronizar_prioridades((tarea,))
     devoluciones = tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
     if usuario and _rol(usuario) == "alumno":
@@ -78,11 +80,12 @@ def _serializar(tarea, usuario=None):
         "estado": tarea.estado,
         "fecha_vencimiento": tarea.fecha_vencimiento.isoformat() if tarea.fecha_vencimiento else "",
         "proyecto_id": tarea.proyecto_id,
+        "puede_adjuntar": bool(usuario and _rol(usuario) == "alumno" and (tarea.creador_id == usuario.pk or tarea.proyecto_id and (tarea.proyecto.creador_id == usuario.pk or tarea.proyecto.integrantes.filter(pk=usuario.pk).exists()))),
         "calificacion": str(tarea.calificacion) if tarea.calificacion is not None else "",
         "retroalimentacion": tarea.retroalimentacion,
         "archivos_adjuntos": [
-            {"id": f.pk, "nombre": f.nombre_original, "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
-            for f in tarea.archivos_adjuntos.all()
+            {"id": f.pk, "nombre": f.nombre_original, "tipo": f.tipo, "extension": f.nombre_original.rsplit(".", 1)[-1].upper() if "." in f.nombre_original else "Archivo", "tamano": f.tamano, "fecha_subida": f.fecha_subida.isoformat(), "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
+            for f in Archivo.objects.filter(Q(tareas_adjuntas=tarea) | Q(tarea=tarea)).distinct()
         ],
         "fecha_creacion": tarea.fecha_creacion.isoformat(),
         "devoluciones": [_serializar_evaluacion(entry, usuario) for entry in devoluciones],
@@ -306,11 +309,22 @@ def api_archivos_tarea(request, pk):
     if request.method == "POST":
         already_attached = tarea.archivos_adjuntos.filter(pk=archivo.pk).exists()
         tarea.archivos_adjuntos.add(archivo)
+        if archivo.tarea_id is None:
+            archivo.tarea = tarea
+            archivo.proyecto = tarea.proyecto
+            archivo.save(update_fields=("tarea", "proyecto"))
         if not already_attached:
             from core.models import Actividad
             Actividad.objects.create(usuario=request.user, descripcion=f"Adjuntaste {archivo.nombre_original} a la tarea {tarea.titulo}.", tipo="adjunto", tarea=tarea, archivo=archivo)
         return JsonResponse({"adjuntado": True})
     tarea.archivos_adjuntos.remove(archivo)
+    if archivo.tarea_id == tarea.pk:
+        archivo.tarea = None
+        has_other_task_in_project = tarea.proyecto_id and archivo.tareas_adjuntas.filter(proyecto_id=tarea.proyecto_id).exists()
+        has_project_attachment = tarea.proyecto_id and archivo.proyectos_adjuntos.filter(pk=tarea.proyecto_id).exists()
+        if archivo.proyecto_id == tarea.proyecto_id and not (has_other_task_in_project or has_project_attachment):
+            archivo.proyecto = None
+        archivo.save(update_fields=("tarea", "proyecto"))
     return JsonResponse({"quitado": True})
 
 

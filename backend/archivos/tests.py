@@ -84,6 +84,13 @@ class ArchivosTests(TestCase):
         self.assertEqual(response.status_code, 400)
         self.assertEqual(Archivo.objects.count(), 0)
 
+    def test_permite_archivos_sql_y_zip_con_contenido_coherente(self):
+        self.client.force_login(self.alumno)
+        sql = self.upload("base_datos.sql", b"CREATE TABLE libros (id INTEGER);\n")
+        archive = self.upload("codigo.zip", b"PK\x03\x04contenido")
+        self.assertEqual(sql.status_code, 201, sql.content)
+        self.assertEqual(archive.status_code, 201, archive.content)
+
     def test_rechaza_archivo_demasiado_grande(self):
         self.client.force_login(self.alumno)
         with patch("archivos.views.MAX_UPLOAD_SIZE", 8):
@@ -182,10 +189,47 @@ class ArchivosTests(TestCase):
         archivo = Archivo.objects.get()
         self.assertEqual(archivo.tarea, tarea)
         self.assertEqual(archivo.proyecto, proyecto)
+        self.assertTrue(tarea.archivos_adjuntos.filter(pk=archivo.pk).exists())
         self.assertEqual(self.upload("otro.pdf", b"%PDF-1.4\ncontenido", proyecto=otro_proyecto.id, tarea=tarea.id).status_code, 400)
 
         self.client.force_login(self.ajeno)
         self.assertEqual(self.upload("intruso.pdf", b"%PDF-1.4\ncontenido", tarea=tarea.id).status_code, 201)
+
+    def test_adjuntos_de_tareas_del_proyecto_son_independientes_y_se_pueden_quitar(self):
+        from tareas.models import Tarea
+
+        proyecto = Proyecto.objects.create(nombre="Biblioteca", creador=self.alumno)
+        proyecto.integrantes.add(self.alumno)
+        analisis = Tarea.objects.create(titulo="Análisis", creador=self.alumno, proyecto=proyecto)
+        diseno = Tarea.objects.create(titulo="Diseño", creador=self.alumno, proyecto=proyecto)
+        self.client.force_login(self.alumno)
+
+        first = self.upload("requisitos.pdf", b"%PDF-1.4\nrequisitos", tarea=analisis.pk)
+        second = self.upload("modelo.pdf", b"%PDF-1.4\nmodelo", tarea=diseno.pk)
+        self.assertEqual(first.status_code, 201, first.content)
+        self.assertEqual(second.status_code, 201, second.content)
+
+        first_id = first.json()["archivo"]["id"]
+        second_id = second.json()["archivo"]["id"]
+        analisis_json = self.client.get(reverse("api_tarea", args=[analisis.pk])).json()["tarea"]
+        diseno_json = self.client.get(reverse("api_tarea", args=[diseno.pk])).json()["tarea"]
+        self.assertEqual([item["id"] for item in analisis_json["archivos_adjuntos"]], [first_id])
+        self.assertEqual([item["id"] for item in diseno_json["archivos_adjuntos"]], [second_id])
+        self.assertEqual(analisis_json["archivos_adjuntos"][0]["extension"], "PDF")
+        self.assertGreater(analisis_json["archivos_adjuntos"][0]["tamano"], 0)
+        self.assertTrue(analisis_json["archivos_adjuntos"][0]["fecha_subida"])
+
+        storage_name = Archivo.objects.get(pk=first_id).archivo.name
+        detached = self.client.delete(
+            reverse("api_archivos_tarea", args=[analisis.pk]),
+            data='{"archivo_id": %d}' % first_id,
+            content_type="application/json",
+        )
+        self.assertEqual(detached.status_code, 200, detached.content)
+        self.assertFalse(analisis.archivos_adjuntos.filter(pk=first_id).exists())
+        self.assertTrue(Archivo.objects.filter(pk=first_id, propietario=self.alumno).exists())
+        self.assertTrue(self.file_field.storage.exists(storage_name))
+        self.assertEqual(self.client.get(reverse("api_tarea", args=[diseno.pk])).json()["tarea"]["archivos_adjuntos"][0]["id"], second_id)
 
     def test_rechaza_carga_sin_archivo_y_ids_malformados(self):
         self.client.force_login(self.alumno)

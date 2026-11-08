@@ -87,11 +87,12 @@ def _serializar_proyecto(proyecto, usuario=None):
                 "fecha_creacion": tarea.fecha_creacion.isoformat(),
                 "prioridad": tarea.prioridad,
                 "estado": tarea.estado,
+                "puede_adjuntar": bool(usuario and _rol(usuario) == "alumno" and alumno_integrante(usuario, proyecto)),
                 "creador": tarea.creador.get_full_name() or tarea.creador.dni,
                 "calificacion": str(tarea.calificacion) if tarea.calificacion is not None else "",
                 "retroalimentacion": tarea.retroalimentacion,
                 "archivos_adjuntos": [
-                    {"id": f.pk, "nombre": f.nombre_original, "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
+                    {"id": f.pk, "nombre": f.nombre_original, "tipo": f.tipo, "extension": f.nombre_original.rsplit(".", 1)[-1].upper() if "." in f.nombre_original else "Archivo", "tamano": f.tamano, "fecha_subida": f.fecha_subida.isoformat(), "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
                     for f in tarea.archivos_adjuntos.all()
                 ],
                 "devoluciones": [
@@ -108,7 +109,7 @@ def _serializar_proyecto(proyecto, usuario=None):
             for d in _devoluciones_visibles(proyecto, usuario)
         ],
         "archivos_adjuntos": [
-            {"id": f.pk, "nombre": f.nombre_original, "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
+            {"id": f.pk, "nombre": f.nombre_original, "tipo": f.tipo, "extension": f.nombre_original.rsplit(".", 1)[-1].upper() if "." in f.nombre_original else "Archivo", "tamano": f.tamano, "fecha_subida": f.fecha_subida.isoformat(), "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
             for f in proyecto.archivos_adjuntos.all()
         ],
     }

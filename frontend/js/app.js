@@ -681,8 +681,36 @@
         projectModal?.classList.remove("show");
     }
     function setTaskModalBusy(busy) {
-        ["#taskInput", "#taskDescription", "#taskDueDate", "#taskStateInput", "#saveTask", "#deleteTaskBtn", "#closeModal"]
+        ["#taskInput", "#taskDescription", "#taskDueDate", "#taskStateInput", "#taskAttachmentInput", "#saveTask", "#deleteTaskBtn", "#closeModal"]
             .forEach((selector) => { const control = $(selector); if (control) control.disabled = busy; });
+    }
+
+    function renderTaskAttachments(container, task) {
+        (task.archivos_adjuntos || []).forEach((file) => {
+            const row = make("div", "attachment-row");
+            const info = make("div", "attachment-info");
+            info.appendChild(make("strong", "", file.nombre));
+            info.appendChild(make("small", "", `${file.extension || file.tipo || "Archivo"} · ${formatBytes(file.tamano || 0)}${file.fecha_subida ? ` · ${new Date(file.fecha_subida).toLocaleDateString("es-AR")}` : ""}`));
+            const open = make("a", "text-button", "Abrir");
+            open.href = file.abrir;
+            open.target = "_blank";
+            open.rel = "noopener noreferrer";
+            const download = make("a", "text-button", "Descargar");
+            download.href = file.descarga;
+            row.append(info, open, download);
+            if (file.puede_quitar) {
+                const remove = make("button", "text-button danger-text", "Quitar");
+                remove.type = "button";
+                remove.addEventListener("click", async () => {
+                    try {
+                        await api(`${taskUrl}${task.id}/archivos/`, "DELETE", { archivo_id: file.id });
+                        await Promise.all([loadTasks(), loadProjects()]);
+                    } catch (error) { notify(error.message, true); }
+                });
+                row.appendChild(remove);
+            }
+            container.appendChild(row);
+        });
     }
     function setProjectModalBusy(busy) {
         ["#projectNameInput", "#projectDescriptionInput", "#projectDueDateInput", "#projectMembersInput", "#saveProjectBtn", "#deleteProjectBtn"]
@@ -725,6 +753,7 @@
                 remove.type = "button";
                 remove.addEventListener("click", () => deleteTask(task));
                 actions.append(stateSelect, edit, remove);
+                renderTaskAttachments(card, task);
                 card.appendChild(actions);
                 column.appendChild(card);
             });
@@ -805,6 +834,7 @@
         $("#taskDescription").value = task?.descripcion || "";
         $("#taskDueDate").value = task?.fecha_vencimiento || "";
         $("#taskStateInput").value = task?.estado || "pendiente";
+        $("#taskAttachmentInput").value = "";
         $("#taskFormError").textContent = "";
         $("#deleteTaskBtn").hidden = !task;
         taskModal.classList.add("show");
@@ -824,15 +854,36 @@
         taskSaveInFlight = true;
         setTaskModalBusy(true);
         try {
-            if (editingTask) await api(`${taskUrl}${editingTask.id}/`, "PATCH", data);
-            else await api(taskUrl, "POST", data);
+            const wasEditing = Boolean(editingTask);
+            const result = editingTask
+                ? await api(`${taskUrl}${editingTask.id}/`, "PATCH", data)
+                : await api(taskUrl, "POST", data);
+            const taskId = editingTask?.id || result.tarea.id;
+            if (!wasEditing) editingTask = result.tarea;
+            const files = [...($("#taskAttachmentInput")?.files || [])];
+            for (const [index, file] of files.entries()) {
+                const form = new FormData();
+                form.append("archivo", file);
+                form.append("tarea", String(taskId));
+                const response = await fetch("/archivos/api/", {
+                    method: "POST",
+                    headers: { "X-CSRFToken": csrf, Accept: "application/json" },
+                    body: form,
+                });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(payload.error || `No se pudo adjuntar ${file.name}.`);
+                const remaining = files.slice(index + 1);
+                const pending = new DataTransfer();
+                remaining.forEach((item) => pending.items.add(item));
+                $("#taskAttachmentInput").files = pending.files;
+            }
             closeTaskModal(true);
             await Promise.all([loadTasks(), loadProjects()]);
             if (projectTaskBoardId) {
                 const refreshed = projects.find((item) => item.id === projectTaskBoardId);
                 if (refreshed) openProjectTaskBoard(refreshed);
             }
-            notify(editingTask ? "Tarea actualizada." : "Tarea creada.");
+            notify(wasEditing ? "Tarea actualizada." : "Tarea creada.");
         } catch (error) { $("#taskFormError").textContent = error.message; }
         finally { taskSaveInFlight = false; setTaskModalBusy(false); }
     }
@@ -1101,6 +1152,7 @@
                     openTask(task, project.id);
                 });
                 card.append(stateSelect, edit);
+                renderTaskAttachments(card, task);
                 column.appendChild(card);
             });
             board.appendChild(column);

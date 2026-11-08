@@ -186,11 +186,18 @@
 
     function appendAttachments(container, files = [], endpoint = "") {
         files.forEach((file) => {
-            const link = make("a", "text-button", `Abrir ${file.nombre}`);
+            const row = make("div", "attachment-row");
+            const info = make("div", "attachment-info");
+            info.appendChild(make("strong", "", file.nombre));
+            info.appendChild(make("small", "", `${file.extension || file.tipo || "Archivo"} · ${formatBytes(file.tamano || 0)}${file.fecha_subida ? ` · ${new Date(file.fecha_subida).toLocaleDateString("es-AR")}` : ""}`));
+            const link = make("a", "text-button", "Abrir");
             link.href = file.abrir;
             link.target = "_blank";
             link.rel = "noopener noreferrer";
-            container.appendChild(link);
+            row.append(info, link);
+            const download = make("a", "text-button", "Descargar");
+            download.href = file.descarga;
+            row.appendChild(download);
             if (endpoint && file.puede_quitar) {
                 const remove = make("button", "text-button danger-text", "Quitar");
                 remove.type = "button";
@@ -198,8 +205,9 @@
                     try { await api(endpoint, "DELETE", { archivo_id: file.id }); notify("Adjunto quitado."); await Promise.all([loadTasks(), loadProjects()]); }
                     catch (error) { notify(error.message, true); }
                 });
-                container.appendChild(remove);
+                row.appendChild(remove);
             }
+            container.appendChild(row);
         });
     }
 
@@ -483,10 +491,12 @@
             appendAttachments(files, task.archivos_adjuntos, `${taskUrl}${task.id}/archivos/`);
             if (!task.archivos_adjuntos.length) files.appendChild(make("p", "empty-state", "No hay archivos adjuntos."));
             content.appendChild(files);
-            const attach = make("button", "secondary-button", "Adjuntar archivos");
-            attach.type = "button";
-            attach.addEventListener("click", async () => { await attachExisting(`${taskUrl}${task.id}/archivos/`); await openTaskDetails(task.id); });
-            content.appendChild(attach);
+            if (task.puede_adjuntar) {
+                const attach = make("button", "secondary-button", "Adjuntar archivos");
+                attach.type = "button";
+                attach.addEventListener("click", async () => { await attachExisting(`${taskUrl}${task.id}/archivos/`); await openTaskDetails(task.id); });
+                content.appendChild(attach);
+            }
             content.appendChild(make("h3", "", "Devoluciones y calificaciones"));
             if (!task.devoluciones.length) content.appendChild(make("p", "empty-state", "Todavía no hay devoluciones para esta tarea."));
             task.devoluciones.forEach((entry) => {
@@ -575,10 +585,12 @@
                 remove.type = "button";
                 remove.addEventListener("click", () => deleteTask(task));
                 actions.append(view, stateSelect, edit, remove);
-                const attach = make("button", "text-button", "Adjuntar archivos");
-                attach.type = "button";
-                attach.addEventListener("click", () => attachExisting(`${taskUrl}${task.id}/archivos/`));
-                actions.appendChild(attach);
+                if (task.puede_adjuntar) {
+                    const attach = make("button", "text-button", "Adjuntar archivos");
+                    attach.type = "button";
+                    attach.addEventListener("click", () => attachExisting(`${taskUrl}${task.id}/archivos/`));
+                    actions.appendChild(attach);
+                }
                 appendAttachments(card, task.archivos_adjuntos, `${taskUrl}${task.id}/archivos/`);
                 card.appendChild(actions);
                 column.appendChild(card);
@@ -646,6 +658,7 @@
         $("#priorityInput").value = task?.prioridad || "media";
         $("#priorityInput").disabled = true;
         $("#taskStateInput").value = task?.estado || "pendiente";
+        $("#taskAttachmentInput").value = "";
         $("#taskFormError").textContent = "";
         $("#deleteTaskBtn").hidden = !task;
         taskModal.classList.add("show");
@@ -672,11 +685,28 @@
         if (!data.titulo) { $("#taskFormError").textContent = "Escribe un título para la tarea."; return; }
         if (!editingTask && taskProjectId) data.proyecto = taskProjectId;
         try {
-            if (editingTask) await api(`${taskUrl}${editingTask.id}/`, "PATCH", data);
-            else await api(taskUrl, "POST", data);
+            const wasEditing = Boolean(editingTask);
+            const result = editingTask
+                ? await api(`${taskUrl}${editingTask.id}/`, "PATCH", data)
+                : await api(taskUrl, "POST", data);
+            const taskId = editingTask?.id || result.tarea.id;
+            if (!wasEditing) editingTask = result.tarea;
+            const selectedFiles = [...($("#taskAttachmentInput")?.files || [])];
+            for (const [index, file] of selectedFiles.entries()) {
+                const form = new FormData();
+                form.append("archivo", file);
+                form.append("tarea", String(taskId));
+                const response = await fetch("/archivos/api/", { method: "POST", headers: { "X-CSRFToken": csrf, Accept: "application/json" }, body: form });
+                const payload = await response.json().catch(() => ({}));
+                if (!response.ok) throw new Error(payload.error || `No se pudo adjuntar ${file.name}.`);
+                const remaining = selectedFiles.slice(index + 1);
+                const pending = new DataTransfer();
+                remaining.forEach((item) => pending.items.add(item));
+                $("#taskAttachmentInput").files = pending.files;
+            }
             closeTaskModal();
             await Promise.all([loadTasks(), loadProjects()]);
-            notify(editingTask ? "Tarea actualizada." : "Tarea creada.");
+            notify(wasEditing ? "Tarea actualizada." : "Tarea creada.");
             loadActivity();
         } catch (error) { $("#taskFormError").textContent = error.message; }
     }
