@@ -1418,6 +1418,10 @@ nav {
         </section>
 
 
+        <section id="tareas-alumnos" class="section" hidden>
+            <div class="section-header"><div><h2>Tareas de alumnos</h2><p>Tareas existentes en los proyectos de tus alumnos.</p></div></div>
+            <div id="studentTaskAssignmentList" class="review-queue" aria-live="polite"><p class="muted">Cargando tareas...</p></div>
+        </section>
         <!-- DOCUMENTOS GENERALES -->
         <section id="documentos" class="section" hidden>
             <div class="section-header">
@@ -1671,6 +1675,7 @@ nav {
                     id: task.id,
                     title: task.titulo,
                     desc: task.descripcion,
+                    author: task.creador,
                     createdAt: task.fecha_creacion,
                     date: task.fecha_vencimiento,
                     column: task.estado === 'completada' ? 'done' : (task.estado === 'en_progreso' ? 'progress' : 'todo'),
@@ -1737,6 +1742,7 @@ nav {
                     if (requestId !== projectLoadRequest) return;
                     teacherDocuments = docs;
                     projects = loadedProjects;
+                    loadStudentTaskAssignments();
                 var projectSelect = $('fileProjectSelect');
                 if (projectSelect) {
                     projectSelect.replaceChildren(new Option('Archivo personal de cátedra', ''));
@@ -1904,6 +1910,99 @@ nav {
             });
         });
         showSection(location.hash.replace('#', '') || 'inicio');
+    }
+
+    function openTeacherAssignedTask(assignment) {
+        var modal = $('teacherTaskDetailModal'), box = $('teacherTaskDetailContent');
+        $('teacherTaskDetailTitle').textContent = 'Tarea · ' + assignment.titulo;
+        box.replaceChildren(el('p', 'muted', 'Cargando tarea…'));
+        modal.showModal();
+        Promise.all([requestJson('/tareas/api/' + assignment.tarea_id + '/'), requestJson('/tareas/api/' + assignment.tarea_id + '/entregas/')])
+            .then(function (results) {
+                var task = results[0].tarea, deliveries = results[1].entregas;
+                box.replaceChildren(el('p', '', 'Alumno: ' + assignment.alumno), el('p', '', 'Materia: No especificada'),
+                    el('h3', '', 'Descripción'), el('p', '', task.descripcion || 'Sin descripción.'),
+                    el('p', '', 'Fecha de entrega: ' + (task.fecha_vencimiento || 'Sin fecha') + ' · Estado: ' + task.estado),
+                    el('h3', '', 'Archivos adjuntos'));
+                (task.archivos_adjuntos || []).forEach(function (file) {
+                    var link = el('a', 'text-button', file.nombre); link.href = file.abrir; link.target = '_blank'; link.rel = 'noopener noreferrer'; box.appendChild(link);
+                });
+                if (!(task.archivos_adjuntos || []).length) box.appendChild(el('p', 'empty-state', 'No hay archivos adjuntos a la tarea.'));
+                box.appendChild(el('h3', '', 'Entrega y devoluciones'));
+                if (!deliveries.length) { box.appendChild(el('p', 'empty-state', 'El alumno todavía no entregó esta tarea.')); return; }
+                deliveries.forEach(function (delivery) {
+                    box.appendChild(el('p', '', 'Estado de entrega: ' + delivery.estado + ' · ' + new Date(delivery.fecha_entrega).toLocaleString('es-AR') + (delivery.observaciones ? ' · ' + delivery.observaciones : '')));
+                    var download = el('a', 'text-button', 'Descargar ' + delivery.nombre); download.href = delivery.descarga; box.appendChild(download);
+                    var preview = el('a', 'text-button', 'Abrir entrega'); preview.href = delivery.descarga + '?inline=1'; preview.target = '_blank'; preview.rel = 'noopener noreferrer'; box.appendChild(preview);
+                    requestJson('/tareas/entregas/' + delivery.id + '/correccion/').then(function (result) {
+                        box.appendChild(el('h3', '', 'Calificaciones y retroalimentaciones anteriores'));
+                        if (!result.historial.length) box.appendChild(el('p', 'empty-state', 'Todavía no hay devoluciones.'));
+                        result.historial.forEach(function (entry) {
+                            var item = el('article', 'project-feedback-entry');
+                            item.appendChild(el('strong', '', (entry.anulada ? 'Anulada · ' : '') + entry.profesor + ' · ' + new Date(entry.fecha).toLocaleString('es-AR') + ' · ' + entry.estado));
+                            if (entry.comentario) item.appendChild(el('p', '', entry.comentario));
+                            if (entry.calificacion !== '') item.appendChild(el('p', '', 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
+                            box.appendChild(item);
+                        });
+                        var current = result.correccion, form = el('form', 'teacher-evaluation-form');
+                        var gradeLabel = el('label', '', 'Calificación (opcional)'), grade = document.createElement('input');
+                        grade.type = 'number'; grade.min = '0'; grade.max = document.body.dataset.gradeMax; grade.step = '0.01'; grade.value = current ? current.calificacion : ''; gradeLabel.appendChild(grade);
+                        var commentLabel = el('label', '', 'Comentario (opcional)'), comment = document.createElement('textarea');
+                        comment.maxLength = 20000; comment.rows = 4; comment.value = current ? current.comentario : ''; commentLabel.appendChild(comment);
+                        var stateLabel = el('label', '', 'Estado de revisión'), state = document.createElement('select');
+                        [['corregida', 'Corregida'], ['devuelta', 'Devuelta para correcciones'], ['en_revision', 'En revisión']].forEach(function (option) { state.add(new Option(option[1], option[0], false, current ? current.estado === option[0] : option[0] === 'corregida')); }); stateLabel.appendChild(state);
+                        var error = el('p', 'form-error', ''), save = el('button', 'primary-button', current ? 'Guardar cambios' : 'Guardar devolución'); save.type = 'submit';
+                        form.append(gradeLabel, commentLabel, stateLabel, error, save);
+                        form.addEventListener('submit', function (event) {
+                            event.preventDefault(); error.textContent = '';
+                            requestJson('/tareas/entregas/' + delivery.id + '/correccion/', {method: current ? 'PUT' : 'POST', headers: {'Content-Type':'application/json','X-CSRFToken':csrfToken()}, body: JSON.stringify({calificacion: grade.value, comentario: comment.value.trim(), estado: state.value})})
+                                .then(function () { openTeacherAssignedTask(assignment); toast('Devolución guardada.'); }).catch(function (err) { error.textContent = err.message; });
+                        });
+                        box.appendChild(form);
+                        if (current) {
+                            var remove = el('button', 'text-button danger-text', 'Eliminar devolución'); remove.type = 'button';
+                            remove.addEventListener('click', function () { requestJson('/tareas/entregas/' + delivery.id + '/correccion/', {method:'DELETE', headers:{'X-CSRFToken':csrfToken()}}).then(function () { openTeacherAssignedTask(assignment); toast('Devolución eliminada.'); }).catch(function (err) { toast(err.message); }); });
+                            box.appendChild(remove);
+                        }
+                    }).catch(function (err) { box.appendChild(el('p', 'form-error', err.message)); });
+                });
+            }).catch(function (err) { box.replaceChildren(el('p', 'form-error', err.message)); });
+    }
+
+    function loadStudentTaskAssignments() {
+        var list = $('studentTaskAssignmentList');
+        if (!list) return;
+        list.replaceChildren();
+        var rows = [];
+        projects.forEach(function (project) {
+            project.tasks.forEach(function (task) { rows.push({project: project, task: task}); });
+        });
+        if (!rows.length) {
+            list.appendChild(el('p', 'muted', 'Todavía no hay tareas en los proyectos supervisados.'));
+            return;
+        }
+        rows.forEach(function (row) {
+            var project = row.project, task = row.task;
+            var card = el('article', 'teacher-summary-card');
+            card.appendChild(el('h3', '', task.title));
+            card.appendChild(el('p', '', 'Alumno: ' + (task.author || project.members.join(', ')) + ' · Proyecto: ' + project.name));
+            card.appendChild(el('p', '', task.desc || 'Sin descripción.'));
+            card.appendChild(el('p', '', 'Estado: ' + task.column + ' · Entrega: ' + (task.date || 'Sin fecha')));
+            (task.attachments || []).forEach(function (file) {
+                var link = el('a', 'text-button', 'Archivo: ' + file.nombre);
+                link.href = file.abrir; link.target = '_blank'; link.rel = 'noopener noreferrer'; card.appendChild(link);
+            });
+            var view = el('button', 'text-button', 'Ver tarea'); view.type = 'button';
+            view.addEventListener('click', function () { showTeacherTaskDetail(task, project); });
+            card.appendChild(view);
+            list.appendChild(card);
+        });
+    }
+
+    function initStudentTaskAssignments() {
+        var nav = document.querySelector('.nav-item[data-section="tareas-alumnos"]');
+        if (nav) nav.addEventListener('click', loadStudentTaskAssignments);
+        loadStudentTaskAssignments();
     }
 
     /* ---------- Inicio ---------- */
@@ -2468,10 +2567,11 @@ nav {
         });
     }
 
-    function showTeacherTaskDetail(task) {
+    function showTeacherTaskDetail(task, project) {
         var box = $('teacherTaskDetailContent');
         box.replaceChildren();
-        box.appendChild(el('p', 'muted', currentProject().name + ' · ' + currentProject().members.join(', ')));
+        box.appendChild(el('p', 'muted', project.name + ' · ' + project.members.join(', ')));
+        box.appendChild(el('p', null, 'Materia: No especificada'));
         box.appendChild(el('p', null, task.desc || 'Sin descripción.'));
         box.appendChild(el('p', 'muted', 'Creada: ' + formatDate(task.createdAt ? task.createdAt.slice(0, 10) : '') + ' · Entrega: ' + (task.date ? formatDate(task.date) : 'Sin fecha') + ' · Estado: ' + task.column));
         box.appendChild(el('h3', null, 'Archivos adjuntos'));
@@ -2500,7 +2600,7 @@ nav {
             var details = event.target.closest('[data-view-task-id]');
             if (details) {
                 var detailTask = currentProject().tasks.filter(function (item) { return item.id === Number(details.dataset.viewTaskId); })[0];
-                if (detailTask) showTeacherTaskDetail(detailTask);
+                if (detailTask) showTeacherTaskDetail(detailTask, currentProject());
                 return;
             }
             var button = event.target.closest('[data-grade-task-id]');
@@ -3024,6 +3124,7 @@ nav {
         initTeacherDocuments();
         initKanban();
         initProjectEvaluation();
+        initStudentTaskAssignments();
         initFeedback();
         initModals();
         initMisc();

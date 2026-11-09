@@ -16,6 +16,8 @@ ALLOWED_EXTENSIONS = {
     ".png",
     ".jpg",
     ".jpeg",
+    ".sql",
+    ".zip",
 }
 
 _OLE_SIGNATURE = b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
@@ -30,6 +32,7 @@ _SIGNATURES = {
     ".png": (b"\x89PNG\r\n\x1a\n",),
     ".jpg": (b"\xff\xd8\xff",),
     ".jpeg": (b"\xff\xd8\xff",),
+    ".zip": (b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08"),
 }
 
 
@@ -51,5 +54,12 @@ def validar_archivo(archivo):
     archivo.seek(0)
     header = archivo.read(16)
     archivo.seek(0)
-    if not any(header.startswith(signature) for signature in _SIGNATURES[extension]):
+    if extension == ".sql":
+        if b"\x00" in header:
+            raise ValidationError("El archivo SQL debe ser texto legible.")
+        try:
+            header.decode("utf-8-sig")
+        except UnicodeDecodeError:
+            raise ValidationError("El archivo SQL debe estar codificado como texto UTF-8.")
+    elif not any(header.startswith(signature) for signature in _SIGNATURES[extension]):
         raise ValidationError("El contenido no coincide con la extensión del archivo.")

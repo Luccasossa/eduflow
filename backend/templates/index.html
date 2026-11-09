@@ -485,6 +485,9 @@
                 <option value="en_progreso">En proceso</option>
                 <option value="completada">Finalizado</option>
             </select>
+            <label for="taskAttachmentInput">Archivos adjuntos</label>
+            <input type="file" id="taskAttachmentInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.sql,.zip">
+            <small>Hasta 10 MB por archivo. Puedes seleccionar varios.</small>
             <p id="taskFormError" class="form-error" role="alert"></p>
             <div class="modal-actions">
                 <button type="button" class="danger-button" id="deleteTaskBtn" hidden>Eliminar</button>

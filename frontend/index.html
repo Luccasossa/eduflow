@@ -436,6 +436,10 @@
         <div class="project-task-board-actions"><button type="button" class="secondary-button" id="backFromProjectTasks">Volver a proyectos</button><button type="button" class="primary-button" id="newProjectBoardTask">+ Nueva tarea</button></div>
         <div class="kanban project-task-board" id="projectTaskBoard" aria-live="polite"></div>
     </dialog>
+    <dialog class="modal" id="detailModal" aria-labelledby="detailTitle">
+        <div class="modal-header"><h2 id="detailTitle">Detalle</h2><button type="button" class="close-modal" id="closeDetailModal" aria-label="Cerrar">×</button></div>
+        <div id="detailContent"></div>
+    </dialog>
     <dialog class="modal project-documents-modal" id="projectDocumentsModal" aria-labelledby="projectDocumentsTitle">
         <div class="modal-header">
             <h2 id="projectDocumentsTitle">Documentos del proyecto</h2>
@@ -485,6 +489,9 @@
                 <option value="en_progreso">En proceso</option>
                 <option value="completada">Finalizado</option>
             </select>
+            <label for="taskAttachmentInput">Archivos adjuntos</label>
+            <input type="file" id="taskAttachmentInput" multiple accept=".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg,.sql,.zip">
+            <small>Hasta 10 MB por archivo. Puedes seleccionar varios.</small>
             <p id="taskFormError" class="form-error" role="alert"></p>
             <div class="modal-actions">
                 <button type="button" class="danger-button" id="deleteTaskBtn" hidden>Eliminar</button>

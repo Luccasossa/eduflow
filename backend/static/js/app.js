@@ -963,6 +963,7 @@
         $("#taskDescription").value = task?.descripcion || "";
         $("#taskDueDate").value = task?.fecha_vencimiento || "";
         $("#taskStateInput").value = task?.estado || "pendiente";
+        $("#taskAttachmentInput").value = "";
         $("#taskFormError").textContent = "";
         $("#deleteTaskBtn").hidden = !task;
         taskModal.classList.add("show");

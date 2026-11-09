@@ -137,6 +137,8 @@ def _guardar_archivo(usuario, uploaded, *, carpeta=None, proyecto=None, tarea=No
         tarea=tarea,
     )
     archivo.save()
+    if tarea is not None:
+        tarea.archivos_adjuntos.add(archivo)
     return archivo
 
 
