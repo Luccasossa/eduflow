@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 
 from archivos.storage import PrivateFileSystemStorage
@@ -45,13 +46,13 @@ class Tarea(models.Model):
 
     creador = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="tareas_creadas",
     )
 
     proyecto = models.ForeignKey(
         "proyectos.Proyecto",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="tareas",
@@ -71,7 +72,7 @@ class Tarea(models.Model):
 
     evaluado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="tareas_evaluadas",
@@ -109,13 +110,21 @@ class Entrega(models.Model):
 
     tarea = models.ForeignKey(
         Tarea,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="entregas",
+    )
+
+    entrega_anterior = models.OneToOneField(
+        "self",
+        on_delete=models.PROTECT,
+        null=True,
+        blank=True,
+        related_name="siguiente_entrega",
     )
 
     alumno = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="entregas_tareas",
     )
 
@@ -140,14 +149,24 @@ class Entrega(models.Model):
         default="",
     )
 
+    devolucion = models.TextField(
+        blank=True,
+        default="",
+    )
+
     class Meta:
         ordering = ["-fecha_entrega"]
-        constraints = [
-            models.UniqueConstraint(
-                fields=["tarea", "alumno"],
-                name="una_entrega_por_alumno_tarea",
-            )
-        ]
+
+    def clean(self):
+        if not self.entrega_anterior_id:
+            return
+        anterior = self.entrega_anterior
+        if anterior.pk == self.pk or anterior.tarea_id != self.tarea_id:
+            raise ValidationError({"entrega_anterior": "El intento anterior debe pertenecer a la misma tarea."})
+        if anterior.estado != "rechazada":
+            raise ValidationError({"entrega_anterior": "Solo se puede corregir un intento rechazado."})
+        if anterior.tarea.proyecto_id is None and anterior.alumno_id != self.alumno_id:
+            raise ValidationError({"alumno": "Una tarea personal solo puede ser corregida por su alumno."})
 
     def __str__(self):
         return (

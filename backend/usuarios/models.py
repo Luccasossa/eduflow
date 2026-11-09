@@ -1,6 +1,8 @@
 from django.db import models
 from django.contrib.auth.models import AbstractUser, BaseUserManager
 from django.core.validators import RegexValidator
+from django.core.exceptions import ValidationError
+from django.db import transaction
 
 
 class UsuarioManager(BaseUserManager):
@@ -50,10 +52,15 @@ class PerfilUsuario(models.Model):
         ("alumno", "Alumno"),
         ("profesor", "Profesor"),
     ]
+    ESPECIALIDADES = [
+        ("IPP", "IPP"),
+        ("GAO", "GAO"),
+        ("TP", "TP"),
+    ]
 
     usuario = models.OneToOneField(
         "usuarios.Usuario",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="perfil"
     )
 
@@ -63,11 +70,27 @@ class PerfilUsuario(models.Model):
         default="alumno"
     )
 
+    especialidad = models.CharField(
+        max_length=3,
+        choices=ESPECIALIDADES,
+        blank=True,
+        default="",
+    )
+
     foto = models.ImageField(
         upload_to="perfiles/",
         blank=True,
         null=True
     )
+
+    def save(self, *args, **kwargs):
+        if self.pk and not self._state.adding:
+            with transaction.atomic():
+                current = type(self).objects.select_for_update().filter(pk=self.pk).values_list("especialidad", flat=True).first()
+                if current and self.especialidad != current:
+                    raise ValidationError({"especialidad": "La especialidad no se puede cambiar una vez registrada."})
+                return super().save(*args, **kwargs)
+        return super().save(*args, **kwargs)
 
     def __str__(self):
         return f"{self.usuario.dni} - {self.rol}"

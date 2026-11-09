@@ -325,6 +325,8 @@ def _serializar_entrega(entrega):
         "fecha_entrega": entrega.fecha_entrega.isoformat(),
         "estado": entrega.estado,
         "observaciones": entrega.observaciones,
+        "devolucion": entrega.devolucion,
+        "entrega_anterior_id": entrega.entrega_anterior_id,
         "descarga": f"/tareas/entregas/{entrega.pk}/descargar/",
     }
 
@@ -470,6 +472,11 @@ def _guardar_o_anular_evaluacion(request, pk, tipo, alumno_id=None):
                 "sin_cambios": True,
             })
         evaluacion.save()
+        if tipo == "grupal":
+            ultima_entrega = Entrega.objects.filter(tarea=tarea).order_by("-fecha_entrega", "-pk").first()
+            if ultima_entrega and ultima_entrega.estado in {"entregada", "en_revision"}:
+                ultima_entrega.estado = "aprobada"
+                ultima_entrega.save(update_fields=("estado",))
         if grade is not None or comment:
             tarea.calificacion = grade
             tarea.retroalimentacion = comment
@@ -532,12 +539,14 @@ def api_entregas(request, pk):
             existentes = Entrega.objects.filter(tarea=tarea)
             if tarea.proyecto_id is None:
                 existentes = existentes.filter(alumno=request.user)
-            if existentes.exists():
+            anterior = existentes.order_by("-fecha_entrega", "-pk").first()
+            if anterior and anterior.estado != "rechazada":
                 return JsonResponse({
-                    "error": "El grupo ya realizó la entrega." if tarea.proyecto_id else "Ya existe una entrega para esta tarea.",
+                    "error": "Solo puedes volver a entregar después de que el docente rechace la entrega vigente.",
                     "entregas": [_serializar_entrega(item) for item in existentes.select_related("alumno", "tarea__proyecto")],
                 }, status=409)
             entrega.tarea = tarea
+            entrega.entrega_anterior = anterior
             entrega.full_clean()
             entrega.save()
     except ValidationError as exc:
@@ -556,6 +565,50 @@ def api_entregas(request, pk):
             )
         raise
     return JsonResponse({"entrega": _serializar_entrega(entrega)}, status=201)
+
+
+@login_required
+@require_http_methods(["POST"])
+@_manejar_conflicto_concurrencia
+def api_revision_entrega(request, pk, entrega_id):
+    if _rol(request.user) != "profesor":
+        return JsonResponse({"error": "Solo el docente asignado puede revisar entregas."}, status=403)
+    data = _json_body(request)
+    if data is None or set(data) - {"estado", "devolucion"}:
+        return JsonResponse({"error": "Envía un estado y, si rechazas, el motivo de devolución."}, status=400)
+    estado = data.get("estado")
+    devolucion = data.get("devolucion", "")
+    if not isinstance(estado, str) or estado not in {"en_revision", "aprobada", "rechazada"}:
+        return JsonResponse({"error": "El estado de revisión no es válido."}, status=400)
+    if not isinstance(devolucion, str) or len(devolucion.strip()) > 20000:
+        return JsonResponse({"error": "El motivo debe ser texto de hasta 20.000 caracteres."}, status=400)
+    devolucion = devolucion.strip()
+    if estado == "rechazada" and not devolucion:
+        return JsonResponse({"error": "Indica el motivo por el que devuelves el trabajo."}, status=400)
+
+    tarea = _tarea_autorizada(request, pk)
+    if tarea.proyecto_id is None:
+        raise Http404
+    with transaction.atomic():
+        tarea = get_object_or_404(Tarea.objects.select_for_update().select_related("proyecto"), pk=pk)
+        if not profesor_autorizado(request.user, tarea.proyecto):
+            raise Http404
+        entrega = get_object_or_404(
+            Entrega.objects.select_for_update().select_related("alumno", "tarea__proyecto"),
+            pk=entrega_id,
+            tarea=tarea,
+        )
+        if Entrega.objects.filter(entrega_anterior=entrega).exists():
+            return JsonResponse({"error": "Esta entrega ya tiene una corrección posterior y su historial no se puede cambiar."}, status=409)
+        if entrega.estado in {"rechazada", "aprobada"}:
+            if entrega.estado == estado and entrega.devolucion == devolucion:
+                return JsonResponse({"entrega": _serializar_entrega(entrega), "sin_cambios": True})
+            return JsonResponse({"error": "Esta revisión ya fue cerrada. La nueva entrega tiene su propio estado."}, status=409)
+        entrega.estado = estado
+        if estado == "rechazada":
+            entrega.devolucion = devolucion
+        entrega.save(update_fields=("estado", "devolucion"))
+    return JsonResponse({"entrega": _serializar_entrega(entrega)})
 
 
 @login_required

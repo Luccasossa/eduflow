@@ -8,7 +8,7 @@ class Proyecto(models.Model):
     descripcion = models.TextField(blank=True)
     creador = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="proyectos_creados"
     )
     integrantes = models.ManyToManyField(
@@ -52,8 +52,8 @@ class DevolucionDocente(models.Model):
     ]
 
     proyecto = models.ForeignKey(Proyecto, on_delete=models.PROTECT, related_name="devoluciones")
-    tarea = models.ForeignKey("tareas.Tarea", on_delete=models.SET_NULL, null=True, blank=True, related_name="devoluciones")
-    documento = models.ForeignKey("documentos.Documento", on_delete=models.SET_NULL, null=True, blank=True, related_name="devoluciones")
+    tarea = models.ForeignKey("tareas.Tarea", on_delete=models.PROTECT, null=True, blank=True, related_name="devoluciones")
+    documento = models.ForeignKey("documentos.Documento", on_delete=models.PROTECT, null=True, blank=True, related_name="devoluciones")
     autor = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="devoluciones_docentes")
     tipo = models.CharField(max_length=12, choices=TIPOS, default="historica")
     alumno = models.ForeignKey(

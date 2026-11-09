@@ -88,7 +88,7 @@
 
     <form action="{% url 'usuarios:logout' %}" method="post" class="logout-form">
         {% csrf_token %}
-        <button type="submit" class="nav-item">Cerrar sesión</button>
+        <button type="submit" class="nav-item logout-button"><span aria-hidden="true">↩</span> Cerrar sesión</button>
     </form>
 
     </aside>
@@ -161,7 +161,7 @@
 
             </div>
 
- 
+
 <!-- ACCESOS RÁPIDOS -->
 
 <div class="quick-access">
@@ -323,6 +323,7 @@
 
                 <div>
                     <h2>Proyectos</h2>
+                    <p>Todos tus proyectos académicos.</p>
                 </div>
 
                 <button class="primary-button" id="newProjectBtn">
@@ -343,7 +344,8 @@
             <div class="section-header">
 
                 <div>
-                    <h2>Archivos</h2>
+                    <h2>Archivos de cursada</h2>
+                    <p>Guardá y organizá tus archivos académicos.</p>
                 </div>
 
                 <button class="primary-button" id="uploadFileBtn" type="button">
@@ -353,6 +355,7 @@
             </div>
 
 
+            <div class="storage" aria-live="polite"><span>Almacenamiento utilizado</span><strong id="storageUsage">Calculando almacenamiento…</strong></div>
             <div class="file-toolbar">
                 <label>Proyecto <select id="fileProjectFilter"><option value="">Todos mis archivos</option></select></label>
                 <label>Carpeta <select id="fileFolderFilter"><option value="">Todas las carpetas</option></select></label>
@@ -360,7 +363,7 @@
             </div>
             <input type="file" id="academicFileInput" accept=".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.txt,.csv" hidden>
             <div class="file-grid" id="academicFileList" aria-live="polite"></div>
-            <p class="muted">PDF, DOCX, XLSX, PPTX, OpenDocument, TXT y CSV; máximo 15 MB por archivo.</p>
+            <p class="muted">PDF, DOCX, XLSX, PPTX, OpenDocument, TXT y CSV; máximo 10 MB por archivo.</p>
 
         </section>
 
@@ -387,23 +390,45 @@
 
         </section>
 
+        <footer class="eduflow-footer">
+        <p>© 2026 EduFlow. Todos los derechos reservados.</p>
+        <p><strong>Desarrollado por:</strong> Carla Juliana Fernandez, Lucca Julian Sosa Alvarenga y Aarón Suárez.</p>
+        <p><strong>Institución:</strong> Universidad Económica Nacional IEN</p>
+        <p><strong>Carrera:</strong> Tecnicatura en Desarrollo de Software</p>
+        <p><strong>Año:</strong> Primer Año.</p>
+    </footer>
     </main>
 
+
     <dialog class="modal profile-modal" id="profileModal" aria-labelledby="profileTitle">
-        <form method="dialog">
-            <div class="modal-header"><h2 id="profileTitle">Mi perfil</h2><button class="close-modal" value="cancel" aria-label="Cerrar">×</button></div>
-            <p class="muted">Los datos se muestran desde tu cuenta autenticada. La edición estará disponible cuando exista una API de perfil.</p>
+        <div>
+            <div class="modal-header"><h2 id="profileTitle">Mi perfil</h2><button type="button" class="close-modal" data-close-profile aria-label="Cerrar">×</button></div>
+            <p class="muted">Datos de tu cuenta autenticada.</p>
             <div class="profile-fields">
-                <label>Nombres<input value="{{ user.first_name }}" disabled></label>
-                <label>Apellidos<input value="{{ user.last_name }}" disabled></label>
-                <label>Correo electrónico<input value="{{ user.email|default:'' }}" disabled></label>
-                <label>DNI<input value="{{ user.dni }}" disabled></label>
-                <label>Especialidad<input value="No registrada en el perfil" disabled></label>
-                <label>Contraseña<input type="password" placeholder="Cambio seguro pendiente" disabled autocomplete="new-password"></label>
+                <label>Nombres<input id="profileFirstName" value="{{ user.first_name }}" disabled></label>
+                <label>Apellidos<input id="profileLastName" value="{{ user.last_name }}" disabled></label>
+                <label>Correo electrónico<input id="profileEmail" value="{{ user.email|default:'' }}" disabled></label>
+                <label>DNI<input id="profileDni" value="{{ user.dni }}" disabled></label>
+                <label>Rol<input id="profileRole" value="Alumno" disabled></label>
+                <label>Especialidad<input id="profileSpecialtyText" value="Cargando…" disabled></label>
             </div>
-            <p class="form-error" role="status">No hay una operación de backend para guardar cambios de perfil o cambiar la contraseña.</p>
-            <div class="modal-actions"><button class="secondary-button" value="cancel">Cancelar</button><button class="primary-button" type="button" disabled>Guardar</button></div>
-        </form>
+            <section id="profileSpecialtySetup" class="profile-password-unavailable" hidden>
+                <h3>Registrar especialidad</h3>
+                <label for="profileSpecialtySelect">Especialidad</label>
+                <select id="profileSpecialtySelect"><option value="">Seleccioná una opción</option><option value="IPP">IPP</option><option value="GAO">GAO</option><option value="TP">TP</option></select>
+                <p id="profileSpecialtyMessage" class="form-error" role="status"></p>
+                <button type="button" class="primary-button" id="saveProfileSpecialty">Guardar especialidad</button>
+            </section>
+            <form id="profilePasswordForm" class="profile-password-unavailable" aria-labelledby="profilePasswordTitle">
+                <h3 id="profilePasswordTitle">Cambio de contraseña</h3>
+                <label>Contraseña actual<span class="password-field"><input name="current" type="password" autocomplete="current-password" required><button type="button" data-toggle-password aria-label="Mostrar contraseña">◉</button></span></label>
+                <label>Nueva contraseña<span class="password-field"><input name="new" type="password" autocomplete="new-password" required><button type="button" data-toggle-password aria-label="Mostrar contraseña">◉</button></span></label>
+                <label>Confirmar nueva contraseña<span class="password-field"><input name="confirmation" type="password" autocomplete="new-password" required><button type="button" data-toggle-password aria-label="Mostrar contraseña">◉</button></span></label>
+                <p id="profilePasswordMessage" class="form-error" role="status"></p>
+                <button type="submit" class="primary-button">Cambiar contraseña</button>
+            </form>
+            <div class="modal-actions"><button type="button" class="secondary-button" data-close-profile>Cerrar</button></div>
+        </div>
     </dialog>
     <dialog class="modal project-task-board-modal" id="projectTaskBoardModal" aria-labelledby="projectTaskBoardTitle">
         <div class="modal-header"><h2 id="projectTaskBoardTitle">Tareas del proyecto</h2><button type="button" class="close-modal" id="closeProjectTaskBoard" aria-label="Cerrar">×</button></div>
@@ -421,16 +446,16 @@
             <button type="button" class="secondary-button" id="backFromProjectDocuments">Volver a proyectos</button>
             <div>
                 <input type="file" id="projectResourceFileInput" accept=".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.txt,.csv" hidden>
-                <button type="button" class="secondary-button" id="uploadProjectResource">Subir archivo</button>
-                <button type="button" class="primary-button" id="newProjectDocument">Crear documento o informe</button>
+                <button type="button" class="secondary-button" id="uploadProjectResource">Subir documento</button>
+                <button type="button" class="primary-button" id="newProjectDocument">Crear documento</button>
             </div>
         </div>
         <section aria-labelledby="projectFilesHeading">
-            <h3 id="projectFilesHeading">Archivos del proyecto</h3>
+                <h3 id="projectFilesHeading">Documentos subidos al proyecto</h3>
             <div class="file-grid" id="projectResourceFiles" aria-live="polite"></div>
         </section>
         <section aria-labelledby="projectDocsHeading">
-            <h3 id="projectDocsHeading">Documentos e informes</h3>
+            <h3 id="projectDocsHeading">Documentos creados</h3>
             <div class="document-list" id="projectResourceDocuments" aria-live="polite"></div>
         </section>
     </dialog>
@@ -442,7 +467,7 @@
 
         <div class="modal">
 
-            <button class="close-modal" id="closeModal">
+            <button type="button" class="close-modal" id="closeTaskModalTop">
                 ×
             </button>
 

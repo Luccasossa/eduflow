@@ -1,4 +1,5 @@
 from django.contrib.auth import get_user_model
+from django.core.exceptions import ValidationError
 from django.test import Client, TestCase
 from django.urls import reverse
 
@@ -128,3 +129,85 @@ class AutenticacionTests(TestCase):
         self.assertEqual(usuario.perfil.rol, "alumno")
         self.assertFalse(usuario.is_staff)
         self.assertFalse(usuario.is_superuser)
+
+
+class PerfilYSeguridadTests(TestCase):
+    def setUp(self):
+        self.user = Usuario.objects.create_user(
+            dni="40123456", password="ClaveSegura_2026!", first_name="Ana", last_name="PÃ©rez",
+            email="40123456@example.com",
+        )
+        PerfilUsuario.objects.create(usuario=self.user, rol="alumno")
+        self.client.force_login(self.user)
+
+    def test_api_perfil_devuelve_datos_autenticados(self):
+        response = self.client.get(reverse("usuarios:api_perfil"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["perfil"], {
+            "nombres": "Ana", "apellidos": "PÃ©rez", "correo": "40123456@example.com",
+            "dni": "40123456", "rol": "alumno", "especialidad": "",
+        })
+
+    def test_api_perfil_muestra_rol_docente_de_la_cuenta_autenticada(self):
+        teacher = Usuario.objects.create_user(dni="40987654", password="ClaveSegura_2026!", first_name="Luis", email="profesor@example.com")
+        PerfilUsuario.objects.create(usuario=teacher, rol="profesor", especialidad="GAO")
+        self.client.force_login(teacher)
+        response = self.client.get(reverse("usuarios:api_perfil"))
+        self.assertEqual(response.json()["perfil"]["rol"], "profesor")
+        self.assertEqual(response.json()["perfil"]["especialidad"], "GAO")
+
+    def test_api_perfil_y_contrasena_requieren_sesion_y_csrf(self):
+        self.client.logout()
+        self.assertEqual(self.client.get(reverse("usuarios:api_perfil")).status_code, 302)
+        client = Client(enforce_csrf_checks=True)
+        client.force_login(self.user)
+        response = client.post(reverse("usuarios:api_cambiar_contrasena"), {
+            "contrasena_actual": "ClaveSegura_2026!", "nueva_contrasena": "NuevaClave_Fuerte_2027!",
+            "confirmacion": "NuevaClave_Fuerte_2027!",
+        }, content_type="application/json")
+        self.assertEqual(response.status_code, 403)
+
+    def test_especialidad_se_registra_una_vez_y_no_se_puede_reemplazar(self):
+        url = reverse("usuarios:api_perfil")
+        first = self.client.patch(url, data='{"especialidad":"IPP"}', content_type="application/json")
+        changed = self.client.patch(url, data='{"especialidad":"GAO"}', content_type="application/json")
+        self.assertEqual(first.status_code, 200)
+        self.assertEqual(changed.status_code, 409)
+        self.user.perfil.refresh_from_db()
+        self.assertEqual(self.user.perfil.especialidad, "IPP")
+
+    def test_especialidad_rechaza_valores_invalidos_y_modelo_bloquea_cambio(self):
+        response = self.client.patch(reverse("usuarios:api_perfil"), data='{"especialidad":"OTRA"}', content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.user.perfil.especialidad = "TP"
+        self.user.perfil.save()
+        self.user.perfil.especialidad = "IPP"
+        with self.assertRaises(ValidationError):
+            self.user.perfil.save()
+
+    def test_cambio_contrasena_validado_actualiza_hash_y_conserva_sesion(self):
+        response = self.client.post(reverse("usuarios:api_cambiar_contrasena"), {
+            "contrasena_actual": "ClaveSegura_2026!", "nueva_contrasena": "NuevaClave_Fuerte_2027!",
+            "confirmacion": "NuevaClave_Fuerte_2027!",
+        }, content_type="application/json")
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(self.client.session.get("_auth_user_id"), str(self.user.pk))
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("NuevaClave_Fuerte_2027!"))
+
+    def test_cambio_contrasena_rechaza_actual_incorrecta_y_confirmacion_distinta(self):
+        url = reverse("usuarios:api_cambiar_contrasena")
+        payload = {"contrasena_actual": "incorrecta", "nueva_contrasena": "NuevaClave_Fuerte_2027!", "confirmacion": "NuevaClave_Fuerte_2027!"}
+        self.assertEqual(self.client.post(url, payload, content_type="application/json").status_code, 400)
+        payload["contrasena_actual"] = "ClaveSegura_2026!"
+        payload["confirmacion"] = "OtraClave_Fuerte_2027!"
+        self.assertEqual(self.client.post(url, payload, content_type="application/json").status_code, 400)
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.check_password("ClaveSegura_2026!"))
+
+    def test_cambio_contrasena_aplica_validadores_de_django(self):
+        response = self.client.post(reverse("usuarios:api_cambiar_contrasena"), {
+            "contrasena_actual": "ClaveSegura_2026!", "nueva_contrasena": "123", "confirmacion": "123",
+        }, content_type="application/json")
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("error", response.json())

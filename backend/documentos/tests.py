@@ -129,6 +129,65 @@ class DocumentosTests(TestCase):
             data=json.dumps({"retroalimentacion": "No"}), content_type="application/json",
         ).status_code, 404)
 
+    def test_estado_explicito_de_revision_y_permisos(self):
+        proyecto = Proyecto.objects.create(nombre="Proyecto con documento", creador=self.alumno)
+        proyecto.integrantes.add(self.alumno, self.comp)
+        proyecto.profesores.add(self.profesor)
+        documento = Documento.objects.create(titulo="Informe", creador=self.alumno, proyecto=proyecto)
+        estado_url = reverse("api_estado_revision_documento", args=[documento.pk])
+        self.assertEqual(documento.estado_revision, "pendiente")
+
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.patch(
+            estado_url, data=json.dumps({"estado_revision": "revisado"}), content_type="application/json",
+        ).status_code, 403)
+        self.client.force_login(self.alumno)
+        visible = self.client.get(reverse("api_documento", args=[documento.pk])).json()["documento"]
+        self.assertEqual(visible["estado_revision"], "pendiente")
+        self.assertEqual(self.client.patch(
+            estado_url, data=json.dumps({"estado_revision": "revisado"}), content_type="application/json",
+        ).status_code, 403)
+
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.patch(
+            estado_url, data=json.dumps({"estado_revision": "desconocido"}), content_type="application/json",
+        ).status_code, 400)
+        response = self.client.patch(
+            estado_url, data=json.dumps({"estado_revision": "en_revision"}), content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["documento"]["estado_revision"], "en_revision")
+        self.client.force_login(self.alumno)
+        self.assertEqual(self.client.get(reverse("api_documento", args=[documento.pk])).json()["documento"]["estado_revision"], "en_revision")
+
+        self.client.force_login(self.profesor)
+        evaluated = self.client.patch(
+            reverse("api_evaluar_documento", args=[documento.pk]),
+            data=json.dumps({"retroalimentacion": "Revisado"}), content_type="application/json",
+        )
+        self.assertEqual(evaluated.status_code, 200, evaluated.content)
+        documento.refresh_from_db()
+        self.assertEqual(documento.estado_revision, "revisado")
+
+        self.client.force_login(self.alumno)
+        saved = self.client.patch(
+            reverse("api_documento", args=[documento.pk]),
+            data=json.dumps({"version": documento.version, "contenido": "Versión corregida"}),
+            content_type="application/json",
+        )
+        self.assertEqual(saved.status_code, 200, saved.content)
+        documento.refresh_from_db()
+        self.assertEqual(documento.estado_revision, "pendiente")
+
+    def test_docente_no_asignado_no_puede_cambiar_estado_de_revision(self):
+        proyecto = Proyecto.objects.create(nombre="Proyecto restringido", creador=self.alumno)
+        documento = Documento.objects.create(titulo="Informe", creador=self.alumno, proyecto=proyecto)
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.patch(
+            reverse("api_estado_revision_documento", args=[documento.pk]),
+            data=json.dumps({"estado_revision": "en_revision"}), content_type="application/json",
+        ).status_code, 404)
+
     def test_docente_no_asignado_no_puede_ver_ni_evaluar_documento_de_proyecto(self):
         proyecto = Proyecto.objects.create(nombre="Proyecto restringido", creador=self.alumno)
         documento = Documento.objects.create(titulo="Informe", creador=self.alumno, proyecto=proyecto)

@@ -11,6 +11,7 @@ urlpatterns = [
     path('api/<int:pk>/evaluaciones/grupal/', views.api_evaluacion_grupal, name='api_evaluacion_grupal'),
     path('api/<int:pk>/evaluaciones/individual/<int:alumno_id>/', views.api_evaluacion_individual, name='api_evaluacion_individual'),
     path('api/<int:pk>/entregas/', views.api_entregas, name='api_entregas'),
+    path('api/<int:pk>/entregas/<int:entrega_id>/revision/', views.api_revision_entrega, name='api_revision_entrega'),
     path('api/<int:pk>/archivos/', views.api_archivos_tarea, name='api_archivos_tarea'),
     path('entregas/<int:pk>/descargar/', views.descargar_entrega, name='descargar_entrega'),
 ]

@@ -1148,6 +1148,15 @@ nav {
         .profile-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
         .profile-fields label { display: grid; gap: 5px; font-size: 13px; color: var(--text-muted); }
         .profile-fields input { width: 100%; padding: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-alt); color: var(--text); }
+        .password-field { display:flex; align-items:stretch; gap:6px; } .password-field input { min-width:0; flex:1; } .password-field button { border:1px solid var(--border); border-radius:7px; padding:0 10px; cursor:pointer; }
+        .profile-password-unavailable label { display:grid; gap:5px; font-size:13px; color:var(--text-muted); }
+        .eduflow-footer { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:8px 24px; margin-top:38px; padding:24px clamp(16px,3vw,36px); border-radius:12px; background:#102a56; color:#fff; font-size:14px; line-height:1.55; }
+        .eduflow-footer p { margin:0; } .eduflow-footer p:first-child { grid-column:1 / -1; font-weight:700; }
+        .logout-button { background:#f97316 !important; color:#fff !important; font-weight:700; }
+        .teacher-document-editor { width:min(1100px, calc(100vw - 32px)); max-height:90vh; overflow:auto; }
+        .teacher-document-editor .document-writing-area { min-height:min(58vh,620px); padding:24px clamp(16px,5vw,64px); }
+        .teacher-document-editor .document-writing-area p { min-height:1.65em; margin:0 0 .5em; }
+        @media (max-width:600px) { .teacher-document-editor { width:calc(100vw - 20px); padding:14px; } .teacher-document-editor .document-writing-area { min-height:48vh; padding:16px; } }
         .teacher-summary-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 18px; }
         .teacher-summary-card { padding: 20px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); }
         .teacher-summary-card > span { color: var(--primary); font-size: 11px; font-weight: 700; letter-spacing: .08em; }
@@ -1161,6 +1170,10 @@ nav {
         .catedra-files-nav { border: 1px solid #f4c7a1; background: #fff4e9; color: #8a3d0b; }
         .catedra-files-nav:hover, .catedra-files-nav.active { background: #ffead6; color: #71350d; }
         .pending-review-item { padding: 7px 0; border-bottom: 1px solid var(--border); }
+        .review-queue-item.delivery-review-card, .review-queue-item.document-review-card { display: flex; flex-direction: column; align-items: flex-start; gap: 9px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+        .document-review-control { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+        .document-review-control select, .delivery-review-card select, .delivery-review-card textarea { border: 1px solid var(--border); border-radius: 7px; padding: 8px; background: var(--surface); color: var(--text); }
+        .delivery-review-card textarea { width: min(100%, 520px); min-height: 70px; }
         @media (max-width: 680px) { .teacher-summary-grid, .profile-fields { grid-template-columns: 1fr; } .teacher-file-actions { flex-wrap: wrap; } #projectDetailView { padding: 12px; } }
     </style>
 
@@ -1245,8 +1258,11 @@ nav {
             <a href="#proyectos" class="nav-item" data-section="proyectos" data-title="Proyectos de Alumnos">
                 <span aria-hidden="true">📊</span> Proyectos de Alumnos
             </a>
+            <a href="#revision-tareas" class="nav-item" data-section="revision-tareas" data-title="Tareas de alumnos">
+                <span aria-hidden="true">✓</span> Revisión Tareas
+            </a>
             <a href="#revisiones" class="nav-item" data-section="revisiones" data-title="Entregas y Revisiones">
-                <span aria-hidden="true">&#128229;</span> Entregas y revisiones
+                <span aria-hidden="true">&#128229;</span> Revisión entregas
             </a>
             <a href="#documentos" class="nav-item" data-section="documentos" data-title="Documentos de Cátedra">
                 <span aria-hidden="true">📝</span> Documentos
@@ -1255,7 +1271,7 @@ nav {
 
         <form action="{% url 'usuarios:logout' %}" method="post" class="logout-form">
             {% csrf_token %}
-            <button type="submit" class="sidebar-option">Cerrar sesión</button>
+            <button type="submit" class="sidebar-option logout-button"><span aria-hidden="true">↩</span> Cerrar sesión</button>
         </form>
 
         <div class="sidebar-bottom">
@@ -1292,7 +1308,7 @@ nav {
                     <div class="avatar" aria-hidden="true">{{ user.first_name|default:user.dni|slice:":1" }}{{ user.last_name|default:""|slice:":1" }}</div>
                     <div>
                         <strong>{{ user.get_full_name|default:user.dni }}</strong>
-                        <small class="badge-role">Docente</small>
+                    <small class="badge-role">Profesor</small>
                     </div>
                 </button>
             </div>
@@ -1310,27 +1326,32 @@ nav {
                 <div class="welcome-decoration" aria-hidden="true">📚</div>
             </div>
             <div class="teacher-summary-grid">
-                <article class="teacher-summary-card"><span>RESUMEN</span><h3>Actividad de la cátedra</h3><div class="teacher-summary-counts"><p><strong id="summaryProjects">0</strong> Proyectos activos</p><p><strong id="summaryTasks">0</strong> Tareas asignadas</p><p><strong id="summaryDeliveries">0</strong> Entregas recibidas</p><p><strong id="summaryEvaluations">0</strong> Evaluaciones vigentes</p><p><strong id="summaryDocuments">0</strong> Documentos disponibles</p></div></article>
-                <article class="teacher-summary-card"><span>SEGUIMIENTO</span><h3>Registros sin devolución</h3><div id="pendingReviewList" aria-live="polite"><p class="muted">Cargando proyectos y documentos…</p></div><button type="button" class="text-button" id="viewProjectsBtn">Ver proyectos</button></article>
+                <article class="teacher-summary-card"><span>Resumen semanal</span><h3>Actividad de la cursada</h3><div class="teacher-summary-counts"><p><strong id="summaryProjects">0</strong> Proyectos activos</p><p><strong id="summaryTasks">0</strong> Tareas registradas</p><p><strong id="summaryDocuments">0</strong> Documentos</p></div></article>
+                <article class="teacher-summary-card"><span>Seguimiento</span><h3>Próxima revisión</h3><p><strong id="pendingReviewCount">0</strong><span id="pendingReviewLabel"> revisiones pendientes</span></p><div id="pendingReviewList" aria-live="polite"><p class="muted">Cargando proyectos y documentos…</p></div><button type="button" class="text-button" id="viewProjectsBtn">Ver proyectos</button></article>
             </div>
         </section>
 
 
         <!-- ARCHIVOS DE CÁTEDRA -->
+        <section id="revision-tareas" class="section" hidden>
+            <div class="section-header"><div><h2>Tareas de alumnos</h2><p>Tareas existentes en los proyectos de tus alumnos por corregir.</p></div></div>
+            <div id="reviewTaskQueue" class="review-queue" aria-live="polite"><p class="muted">Cargando tareas para revisar…</p></div>
+        </section>
+
         <section id="revisiones" class="section" hidden>
             <div class="section-header">
                 <div>
-                    <h2>Entregas y revisiones</h2>
+                    <h2>Revisión entregas</h2>
                     <p>Accedé a las entregas y documentos asociados a los proyectos asignados.</p>
                 </div>
             </div>
-            <div id="reviewQueue" class="review-queue" aria-live="polite"><p class="muted">Cargando revisiones...</p></div>
+            <div id="reviewDeliveryQueue" class="review-queue" aria-live="polite"><p class="muted">Cargando entregas y documentos…</p></div>
         </section>
 
         <section id="archivos-catedra" class="section" hidden>
             <div class="section-header">
                 <div>
-                    <h2>Mis Archivos de Cátedra</h2>
+                    <h2>Archivos de cursada</h2>
                     <p>Subí y gestioná tus materiales didácticos, guías y documentos teóricos.</p>
                 </div>
                 <div class="teacher-file-actions"><button type="button" class="primary-button" id="uploadBtn">⬆ Subir archivos</button><button type="button" class="secondary-button" id="createTeacherFolderBtn">Crear carpeta</button></div>
@@ -1401,24 +1422,21 @@ nav {
         <section id="documentos" class="section" hidden>
             <div class="section-header">
                 <div>
-                    <h2>Documentos de Cátedra</h2>
+                    <h2>Documentos</h2>
                     <p>Documentos institucionales y plantillas generales.</p>
                 </div>
                 <button type="button" class="primary-button" id="newTeacherDocument">+ Nuevo documento</button>
             </div>
-            <div class="document-list">
-                <div class="document-card">
-                    <div class="document-info">
-                        <div class="document-icon" aria-hidden="true">📝</div>
-                        <div>
-                            <strong>Plantilla_Informe_Trabajo_Practico.docx</strong>
-                            <span>Creado por Docente • Actualizado recientemente</span>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <div class="document-list" id="teacherDocumentList" aria-live="polite"><p class="muted">Cargando documentos…</p></div>
         </section>
 
+        <footer class="eduflow-footer">
+            <p>© 2026 EduFlow. Todos los derechos reservados.</p>
+            <p><strong>Desarrollado por:</strong> Carla Juliana Fernandez, Lucca Julian Sosa Alvarenga y Aarón Suárez.</p>
+            <p><strong>Institución:</strong> Universidad Económica Nacional IEN</p>
+            <p><strong>Carrera:</strong> Tecnicatura en Desarrollo de Software</p>
+            <p><strong>Año:</strong> Primer Año.</p>
+        </footer>
     </main>
 
 
@@ -1461,7 +1479,7 @@ nav {
         </form>
     </dialog>
 
-    <dialog class="modal modal-small" id="teacherDocumentEditor" aria-labelledby="teacherDocumentTitle">
+    <dialog class="modal teacher-document-editor" id="teacherDocumentEditor" aria-labelledby="teacherDocumentTitle">
         <form id="teacherDocumentForm">
             <div class="modal-header">
                 <h2 id="teacherDocumentTitle">Nuevo documento de cátedra</h2>
@@ -1472,7 +1490,17 @@ nav {
             <label for="teacherDocProject">Proyecto (opcional)</label>
             <select id="teacherDocProject"><option value="">Documento personal</option></select>
             <label for="teacherDocContent">Contenido</label>
-            <textarea id="teacherDocContent" rows="12" maxlength="1000000"></textarea>
+            <div class="document-toolbar teacher-document-toolbar" role="toolbar" aria-label="Formato del documento">
+                <label>Fuente <select id="teacherDocFont"><option>Arial</option><option>Georgia</option><option>Times New Roman</option><option>Verdana</option><option>Tahoma</option><option>Courier New</option></select></label>
+                <label>Tamaño <select id="teacherDocSize"><option>10</option><option>12</option><option>14</option><option selected>16</option><option>18</option><option>24</option><option>32</option><option>48</option></select></label>
+                <button type="button" data-teacher-format="bold" aria-label="Negrita"><strong>N</strong></button>
+                <button type="button" data-teacher-format="italic" aria-label="Cursiva"><em>K</em></button>
+                <button type="button" data-teacher-align="left" aria-label="Alinear a la izquierda">⇤</button>
+                <button type="button" data-teacher-align="center" aria-label="Centrar">↔</button>
+                <button type="button" data-teacher-align="right" aria-label="Alinear a la derecha">⇥</button>
+                <button type="button" data-teacher-align="justify" aria-label="Justificar">☰</button>
+            </div>
+            <div id="teacherDocContent" class="document-writing-area" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido del documento"></div>
             <p id="teacherDocError" class="form-error" role="alert"></p>
             <pre id="teacherDocConflict" hidden></pre>
             <button type="button" class="secondary-button" id="teacherDocRestore" hidden>Cargar version guardada</button>
@@ -1531,9 +1559,10 @@ nav {
                 <button type="button" class="close-modal" data-close aria-label="Cerrar">×</button>
             </div>
             <p id="evaluationTaskTitle" class="muted"></p>
+            <div id="taskEvaluationHistory" class="project-feedback-history"></div>
             <div class="form-field">
                 <label for="evaluationGrade">Calificación</label>
-                <input id="evaluationGrade" type="number" min="0" max="{{ calificacion_maxima }}" step="0.01" required>
+                <input id="evaluationGrade" type="number" min="0" max="{{ calificacion_maxima }}" step="0.01">
             </div>
             <div class="form-field">
                 <label for="evaluationFeedback">Retroalimentación</label>
@@ -1550,25 +1579,44 @@ nav {
         </form>
     </dialog>
 
+    <dialog class="modal modal-small" id="teacherTaskDetailModal" aria-labelledby="teacherTaskDetailTitle">
+        <div class="modal-header"><h2 id="teacherTaskDetailTitle">Detalle de tarea</h2><button type="button" class="close-modal" data-close aria-label="Cerrar">×</button></div>
+        <div id="teacherTaskDetailContent"></div>
+    </dialog>
+
 
     <!-- Aviso emergente -->
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
     <dialog class="modal modal-small profile-modal" id="teacherProfileModal" aria-labelledby="teacherProfileTitle">
-        <form method="dialog">
-            <div class="modal-header"><h2 id="teacherProfileTitle">Mi perfil docente</h2><button type="submit" class="close-modal" value="cancel" aria-label="Cerrar">×</button></div>
-            <p class="muted">Los datos se muestran desde la cuenta autenticada. La edición requiere una API de perfil.</p>
+        <div>
+            <div class="modal-header"><h2 id="teacherProfileTitle">Mi perfil docente</h2><button type="button" class="close-modal" data-close-profile aria-label="Cerrar">×</button></div>
+            <p class="muted">Datos de tu cuenta autenticada.</p>
             <div class="profile-fields">
-                <label>Nombres<input value="{{ user.first_name }}" disabled></label>
-                <label>Apellidos<input value="{{ user.last_name }}" disabled></label>
-                <label>Correo electrónico<input value="{{ user.email|default:'' }}" disabled></label>
-                <label>DNI<input value="{{ user.dni }}" disabled></label>
-                <label>Materias a cargo<input value="No disponibles en el perfil actual" disabled></label>
-                <label>Contraseña<input type="password" placeholder="Cambio seguro pendiente" disabled autocomplete="new-password"></label>
+                <label>Nombres<input id="profileFirstName" value="{{ user.first_name }}" disabled></label>
+                <label>Apellidos<input id="profileLastName" value="{{ user.last_name }}" disabled></label>
+                <label>Correo electrónico<input id="profileEmail" value="{{ user.email|default:'' }}" disabled></label>
+                <label>DNI<input id="profileDni" value="{{ user.dni }}" disabled></label>
+                <label>Rol<input id="profileRole" value="Profesor" disabled></label>
+                <label>Especialidad<input id="profileSpecialtyText" value="Cargando…" disabled></label>
             </div>
-            <p class="form-error" role="status">No existe una operación de backend para guardar el perfil o cambiar la contraseña.</p>
-            <div class="modal-actions"><button type="submit" class="secondary-button" value="cancel">Cancelar</button><button type="button" class="primary-button" disabled>Guardar</button></div>
-        </form>
+            <section id="profileSpecialtySetup" class="profile-password-unavailable" hidden>
+                <h3>Registrar especialidad</h3>
+                <label for="profileSpecialtySelect">Especialidad</label>
+                <select id="profileSpecialtySelect"><option value="">Seleccioná una opción</option><option value="IPP">IPP</option><option value="GAO">GAO</option><option value="TP">TP</option></select>
+                <p id="profileSpecialtyMessage" class="form-error" role="status"></p>
+                <button type="button" class="primary-button" id="saveProfileSpecialty">Guardar especialidad</button>
+            </section>
+            <form id="profilePasswordForm" class="profile-password-unavailable" aria-labelledby="teacherPasswordTitle">
+                <h3 id="teacherPasswordTitle">Cambio de contraseña</h3>
+                <label>Contraseña actual<span class="password-field"><input name="current" type="password" autocomplete="current-password" required><button type="button" data-toggle-password aria-label="Mostrar contraseña">◉</button></span></label>
+                <label>Nueva contraseña<span class="password-field"><input name="new" type="password" autocomplete="new-password" required><button type="button" data-toggle-password aria-label="Mostrar contraseña">◉</button></span></label>
+                <label>Confirmar nueva contraseña<span class="password-field"><input name="confirmation" type="password" autocomplete="new-password" required><button type="button" data-toggle-password aria-label="Mostrar contraseña">◉</button></span></label>
+                <p id="profilePasswordMessage" class="form-error" role="status"></p>
+                <button type="submit" class="primary-button">Cambiar contraseña</button>
+            </form>
+            <div class="modal-actions"><button type="button" class="secondary-button" data-close-profile>Cerrar</button></div>
+        </div>
     </dialog>
 
 <script>
@@ -1592,6 +1640,8 @@ nav {
 
     var state = { projectId: null, docId: null, editingTaskId: null, editingDocument: null, nextTaskId: 100 };
     var evaluationTask = null;
+    var editingEvaluationId = null;
+    var editingProjectFeedbackId = null;
     var teacherDocumentSession = 0;
     var teacherDocumentSaving = false;
     var teacherDocumentLoading = false;
@@ -1621,11 +1671,14 @@ nav {
                     id: task.id,
                     title: task.titulo,
                     desc: task.descripcion,
+                    createdAt: task.fecha_creacion,
                     date: task.fecha_vencimiento,
                     column: task.estado === 'completada' ? 'done' : (task.estado === 'en_progreso' ? 'progress' : 'todo'),
                     priority: task.prioridad,
                     grade: task.calificacion,
                     feedback: task.retroalimentacion,
+                    attachments: task.archivos_adjuntos || [],
+                    feedbackHistory: task.devoluciones || [],
                     deliveries: [],
                     groupEvaluation: null,
                     individualEvaluations: []
@@ -1667,7 +1720,7 @@ nav {
                 return Promise.all(results[0].proyectos.map(function (project) {
                     var mapped = mapProject(project);
                     mapped.docs = docs.filter(function (doc) { return doc.proyecto_id === project.id; }).map(function (doc) {
-                        return { id: doc.id, name: doc.titulo, author: doc.creador, when: formatDate(doc.fecha_actualizacion.slice(0, 10)), body: doc.contenido, feedback: doc.retroalimentacion, grade: doc.calificacion };
+                    return { id: doc.id, name: doc.titulo, author: doc.creador, when: formatDate(doc.fecha_actualizacion.slice(0, 10)), body: doc.contenido, feedback: doc.retroalimentacion, grade: doc.calificacion, reviewState: doc.estado_revision };
                     });
                     return Promise.all(mapped.tasks.map(function (task) {
                         return Promise.all([
@@ -1677,6 +1730,7 @@ nav {
                             task.deliveries = data[0].entregas;
                             task.groupEvaluation = data[1].grupal;
                             task.individualEvaluations = data[1].individuales;
+                            task.feedbackHistory = data[1].historial || task.feedbackHistory;
                         });
                     })).then(function () { return mapped; });
                 })).then(function (loadedProjects) {
@@ -1720,6 +1774,90 @@ nav {
         var parts = iso.split('-');
         var months = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic'];
         return parseInt(parts[2], 10) + ' ' + months[parseInt(parts[1], 10) - 1];
+    }
+
+    function reviewStateLabel(state) {
+        return ({ pendiente: 'Pendiente de revisión', en_revision: 'En revisión', revisado: 'Revisado', entregada: 'Entregada', aprobada: 'Aprobada', rechazada: 'Requiere corrección' })[state] || 'Sin estado';
+    }
+
+    function deliveryDeadlineLabel(delivery, task) {
+        if (!task.date) return 'Sin fecha límite';
+        var parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: document.body.dataset.timezone || 'UTC', calendar: 'gregory', numberingSystem: 'latn',
+            year: 'numeric', month: '2-digit', day: '2-digit'
+        }).formatToParts(new Date(delivery.fecha_entrega));
+        var date = {};
+        parts.forEach(function (part) { date[part.type] = part.value; });
+        var submitted = date.year + '-' + date.month + '-' + date.day;
+        return submitted <= task.date ? 'Entregada a tiempo' : 'Entregada tarde';
+    }
+
+    function makeDocumentReviewControl(doc) {
+        var wrapper = el('div', 'document-review-control');
+        var label = el('span', 'muted', 'Estado: ' + reviewStateLabel(doc.estado_revision));
+        var select = document.createElement('select');
+        select.setAttribute('aria-label', 'Estado de revisión de ' + doc.titulo);
+        [['pendiente', 'Pendiente de revisión'], ['en_revision', 'En revisión'], ['revisado', 'Revisado']].forEach(function (item) {
+            select.add(new Option(item[1], item[0], false, item[0] === doc.estado_revision));
+        });
+        var save = el('button', 'text-button', 'Actualizar estado');
+        save.type = 'button';
+        save.addEventListener('click', function () {
+            save.disabled = true;
+            requestJson('/documentos/api/' + doc.id + '/estado-revision/', {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+                body: JSON.stringify({ estado_revision: select.value })
+            }).then(function () {
+                return loadProjects().then(function () { toast('Estado de revisión actualizado.'); });
+            }).catch(function (error) {
+                toast(error.message);
+                save.disabled = false;
+            });
+        });
+        wrapper.append(label, select, save);
+        return wrapper;
+    }
+
+    function makeDeliveryReviewCard(container, project, task, delivery) {
+        var card = el('article', 'review-queue-item delivery-review-card');
+        card.appendChild(el('strong', null, task.title + ' · ' + project.name));
+        card.appendChild(el('span', 'muted', delivery.alumno + ' · ' + formatDate(delivery.fecha_entrega.slice(0, 10)) + ' · ' + deliveryDeadlineLabel(delivery, task) + ' · ' + reviewStateLabel(delivery.estado)));
+        var download = el('a', 'text-button', 'Descargar entrega');
+        download.href = delivery.descarga;
+        card.appendChild(download);
+        var stateSelect = document.createElement('select');
+        stateSelect.setAttribute('aria-label', 'Estado de la entrega de ' + task.title);
+        [['en_revision', 'En revisión'], ['aprobada', 'Aprobada'], ['rechazada', 'Rechazada']].forEach(function (item) {
+            stateSelect.add(new Option(item[1], item[0], false, item[0] === (delivery.estado === 'entregada' ? 'en_revision' : delivery.estado)));
+        });
+        var reason = document.createElement('textarea');
+        reason.maxLength = 20000;
+        reason.placeholder = 'Motivo de devolución (obligatorio si rechazas)';
+        reason.setAttribute('aria-label', 'Motivo de devolución de la entrega');
+        var save = el('button', 'primary-button', 'Guardar revisión');
+        save.type = 'button';
+        save.addEventListener('click', function () {
+            if (stateSelect.value === 'rechazada' && !reason.value.trim()) {
+                reason.setCustomValidity('Indica el motivo de devolución.');
+                reason.reportValidity();
+                return;
+            }
+            reason.setCustomValidity('');
+            save.disabled = true;
+            requestJson('/tareas/api/' + task.id + '/entregas/' + delivery.id + '/revision/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+                body: JSON.stringify({ estado: stateSelect.value, devolucion: reason.value.trim() })
+            }).then(function () {
+                return loadProjects().then(function () { toast('Revisión de entrega guardada.'); });
+            }).catch(function (error) {
+                toast(error.message);
+                save.disabled = false;
+            });
+        });
+        card.append(stateSelect, reason, save);
+        container.appendChild(card);
     }
 
     function isOverdue(iso) {
@@ -1786,44 +1924,89 @@ nav {
             ' para revisar.';
         $('summaryProjects').textContent = String(n);
         $('summaryTasks').textContent = String(tasks.length);
-        $('summaryDeliveries').textContent = String(deliveries);
-        $('summaryEvaluations').textContent = String(evaluations);
+        if ($('summaryDeliveries')) $('summaryDeliveries').textContent = String(deliveries);
+        if ($('summaryEvaluations')) $('summaryEvaluations').textContent = String(evaluations);
         $('summaryDocuments').textContent = String(teacherDocuments.length);
-        var pendingTasks = tasks.filter(function (task) {
-            return task.deliveries.length > 0 && !task.groupEvaluation;
+        var documentList = $('teacherDocumentList');
+        if (documentList) {
+            documentList.replaceChildren();
+            if (!teacherDocuments.length) documentList.appendChild(el('p', 'muted', 'Todavía no hay documentos guardados.'));
+            teacherDocuments.forEach(function (doc) {
+                var card = el('article', 'document-card');
+                var title = el('strong', null, doc.titulo);
+                var meta = el('span', null, doc.proyecto || 'Documento institucional');
+                var open = el('button', 'text-button', doc.puede_editar ? 'Abrir y editar' : 'Ver');
+                open.type = 'button';
+                open.addEventListener('click', function () { openTeacherDocument(doc); });
+                card.append(title, meta, open);
+                if (doc.proyecto_id) card.appendChild(makeDocumentReviewControl(doc));
+                documentList.appendChild(card);
+            });
+        }
+        var pendingDeliveries = [];
+        tasks.forEach(function (task) {
+            if (!task.deliveries.length) return;
+            var latest = task.deliveries.reduce(function (current, item) {
+                return !current || item.fecha_entrega > current.fecha_entrega || (item.fecha_entrega === current.fecha_entrega && item.id > current.id) ? item : current;
+            }, null);
+            if (latest && (latest.estado === 'entregada' || latest.estado === 'en_revision')) {
+                var project = projects.filter(function (item) { return item.tasks.indexOf(task) !== -1; })[0];
+                if (project) pendingDeliveries.push({ project: project, task: task, delivery: latest });
+            }
         });
-        var pending = teacherDocuments.filter(function (doc) {
-            return doc.proyecto_id && !doc.calificacion && !doc.retroalimentacion;
+        var pendingDocuments = teacherDocuments.filter(function (doc) {
+            return doc.proyecto_id && (doc.estado_revision === 'pendiente' || doc.estado_revision === 'en_revision');
         });
         var list = $('pendingReviewList');
-        var queue = $('reviewQueue');
+        var taskQueue = $('reviewTaskQueue');
+        var deliveryQueue = $('reviewDeliveryQueue');
         list.replaceChildren();
-        queue.replaceChildren();
-        if (!pending.length && !pendingTasks.length) {
-            list.appendChild(el('p', 'muted', 'No hay entregas sin evaluación grupal ni documentos sin devolución registrada.'));
-            queue.appendChild(el('p', 'muted', 'No hay registros sin devolución para los proyectos cargados.'));
+        taskQueue.replaceChildren();
+        deliveryQueue.replaceChildren();
+        var pendingCount = pendingDeliveries.length + pendingDocuments.length;
+        $('pendingReviewCount').textContent = String(pendingCount);
+        $('pendingReviewLabel').textContent = pendingCount === 1 ? ' revisión pendiente' : ' revisiones pendientes';
+        if (!pendingDocuments.length && !pendingDeliveries.length) {
+            list.appendChild(el('p', 'muted', 'No tenés revisiones pendientes.'));
+            taskQueue.appendChild(el('p', 'muted', 'No tenés tareas pendientes de revisión.'));
+            deliveryQueue.appendChild(el('p', 'muted', 'No tenés entregas ni documentos pendientes de revisión.'));
         }
-        pendingTasks.forEach(function (task) {
-            var project = projects.filter(function (item) { return item.tasks.indexOf(task) !== -1; })[0];
-            if (!project) return;
-            var label = 'Entrega sin evaluación grupal: ' + task.title + ' · ' + project.name;
-            list.appendChild(el('p', 'pending-review-item', label));
+        pendingDeliveries.forEach(function (entry) {
+            var task = entry.task;
+            var project = entry.project;
+            var delivery = entry.delivery;
+            var label = 'Entrega para revisar: ' + task.title + ' · ' + project.name;
+            var summaryButton = el('button', 'text-button pending-review-item', label);
+            summaryButton.type = 'button'; summaryButton.dataset.reviewProjectId = project.id; summaryButton.dataset.reviewTaskId = task.id;
+            list.appendChild(summaryButton);
             var taskButton = el('button', 'text-button review-queue-item', label);
             taskButton.type = 'button';
             taskButton.dataset.reviewProjectId = project.id;
             taskButton.dataset.reviewTaskId = task.id;
-            queue.appendChild(taskButton);
+            taskQueue.appendChild(taskButton);
+            makeDeliveryReviewCard(deliveryQueue, project, task, delivery);
         });
-        pending.forEach(function (doc) {
+        pendingDocuments.forEach(function (doc) {
             var project = projects.filter(function (item) { return item.id === Number(doc.proyecto_id); })[0];
             if (!project) return;
-            var label = 'Documento sin devolución: ' + doc.titulo + ' · ' + project.name;
-            list.appendChild(el('p', 'pending-review-item', label));
-            var docButton = el('button', 'text-button review-queue-item', label);
-            docButton.type = 'button';
-            docButton.dataset.reviewProjectId = project.id;
-            docButton.dataset.reviewDocId = doc.id;
-            queue.appendChild(docButton);
+            var label = 'Documento ' + reviewStateLabel(doc.estado_revision).toLowerCase() + ': ' + doc.titulo + ' · ' + project.name;
+            var summaryButton = el('button', 'text-button pending-review-item', label);
+            summaryButton.type = 'button'; summaryButton.dataset.reviewProjectId = project.id; summaryButton.dataset.reviewDocId = doc.id;
+            list.appendChild(summaryButton);
+            var card = el('article', 'review-queue-item document-review-card');
+            card.appendChild(el('strong', null, label));
+            card.appendChild(el('span', 'muted', 'Estado actual: ' + reviewStateLabel(doc.estado_revision)));
+            var open = el('button', 'text-button', 'Abrir documento');
+            open.type = 'button';
+            open.addEventListener('click', function () {
+                document.querySelector('.nav-item[data-section="proyectos"]').click();
+                openProject(project.id);
+                switchTab('tab-docs');
+                var docButton = document.querySelector('#projectDocList [data-doc-id="' + doc.id + '"]');
+                if (docButton) docButton.click();
+            });
+            card.append(open, makeDocumentReviewControl(doc));
+            deliveryQueue.appendChild(card);
         });
     }
 
@@ -1967,12 +2150,13 @@ nav {
     function renderProjectFeedback(project) {
         var box = $('projectFeedbackHistory');
         if (!box) return;
+        var projectEntries = project.devoluciones.filter(function (entry) { return !entry.tarea_id && !entry.documento_id; });
         box.replaceChildren(el('h3', null, 'Historial de devoluciones'));
-        if (!project.devoluciones.length) {
+        if (!projectEntries.length) {
             box.appendChild(el('p', 'muted', 'Todavía no hay devoluciones para este proyecto.'));
             return;
         }
-        project.devoluciones.forEach(function (entry) {
+        projectEntries.forEach(function (entry) {
             var item = el('article', 'project-feedback-entry');
             var evaluationLabel = entry.tipo === 'grupal' ? 'Evaluación grupal'
                 : entry.tipo === 'individual' ? 'Evaluación individual · ' + entry.alumno
@@ -1990,14 +2174,41 @@ nav {
             if (entry.tarea || entry.documento) item.appendChild(el('p', 'muted', 'Sobre ' + (entry.tarea || entry.documento)));
             if (entry.comentario) item.appendChild(el('p', null, entry.comentario));
             if (entry.calificacion) item.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
+            if (entry.puede_editar) {
+                var actions = el('div', 'modal-actions');
+                var edit = el('button', 'text-button', 'Editar devoluciÃ³n');
+                edit.type = 'button';
+                edit.addEventListener('click', function () { openProjectFeedbackEditor(entry); });
+                var remove = el('button', 'danger-button', 'Eliminar');
+                remove.type = 'button';
+                remove.addEventListener('click', function () {
+                    if (!window.confirm('Â¿Eliminar esta devoluciÃ³n?')) return;
+                    requestJson('/proyectos/api/devoluciones/' + entry.id + '/', { method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() } })
+                        .then(function () { return refreshEvaluationProject('DevoluciÃ³n eliminada.'); })
+                        .catch(function (error) { toast(error.message || 'No se pudo eliminar la devoluciÃ³n.'); });
+                });
+                actions.append(edit, remove);
+                item.appendChild(actions);
+            }
             box.appendChild(item);
         });
     }
 
+    function openProjectFeedbackEditor(entry) {
+        editingProjectFeedbackId = entry.id;
+        $('projectEvaluationGrade').value = entry.calificacion || '';
+        $('projectEvaluationComment').value = entry.comentario || '';
+        $('projectEvaluationTitle').textContent = 'Editar devoluci\u00f3n';
+        $('projectEvaluationError').textContent = '';
+        $('projectEvaluationModal').showModal();
+    }
+
     function initProjectEvaluation() {
         $('gradeProjectBtn').addEventListener('click', function () {
+            editingProjectFeedbackId = null;
             $('projectEvaluationGrade').value = '';
             $('projectEvaluationComment').value = '';
+            $('projectEvaluationTitle').textContent = 'Nueva devoluci\u00f3n del proyecto';
             $('projectEvaluationError').textContent = '';
             $('projectEvaluationModal').showModal();
         });
@@ -2005,10 +2216,15 @@ nav {
             event.preventDefault();
             var payload = { comentario: $('projectEvaluationComment').value.trim() };
             if ($('projectEvaluationGrade').value !== '') payload.calificacion = $('projectEvaluationGrade').value;
-            requestJson('/proyectos/api/' + state.projectId + '/devoluciones/', {
-                method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() }, body: JSON.stringify(payload)
+            if (!payload.comentario && payload.calificacion === undefined) {
+                $('projectEvaluationError').textContent = 'Escribe un comentario o una calificaci\u00f3n.';
+                return;
+            }
+            requestJson(editingProjectFeedbackId ? '/proyectos/api/devoluciones/' + editingProjectFeedbackId + '/' : '/proyectos/api/' + state.projectId + '/devoluciones/', {
+                method: editingProjectFeedbackId ? 'PATCH' : 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() }, body: JSON.stringify(payload)
             }).then(function () {
                 $('projectEvaluationModal').close();
+                editingProjectFeedbackId = null;
                 return loadProjects();
             }).then(function () { openProject(state.projectId); toast('Devolución guardada.'); })
                 .catch(function (error) { $('projectEvaluationError').textContent = error.message; });
@@ -2045,17 +2261,32 @@ nav {
             tasks.forEach(function (t) {
                 var card = el('div', 'kanban-card' + (col.key === 'done' ? ' completed' : ''));
                 card.appendChild(el('strong', null, t.title));
+                var detailsButton = el('button', 'text-button', 'Ver tarea');
+                detailsButton.type = 'button';
+                detailsButton.dataset.viewTaskId = t.id;
+                card.appendChild(detailsButton);
                 if (t.desc) card.appendChild(el('p', null, t.desc));
                 card.appendChild(el('p', 'task-priority-label', 'Prioridad: ' + (t.priority || 'media')));
 
                 var deliveryBox = el('div', 'project-task-deliveries');
                 deliveryBox.appendChild(el('strong', null, 'Entrega grupal'));
                 deliveryBox.appendChild(el('p', 'muted', 'Integrantes: ' + (p.members.join(', ') || 'Sin integrantes')));
+                if (t.attachments && t.attachments.length) {
+                    deliveryBox.appendChild(el('strong', null, 'Archivos adjuntos del alumno'));
+                    t.attachments.forEach(function (file) {
+                        var openAttachment = el('a', 'text-button', 'Abrir ' + file.nombre);
+                        openAttachment.href = file.abrir;
+                        openAttachment.target = '_blank';
+                        openAttachment.rel = 'noopener noreferrer';
+                        deliveryBox.appendChild(openAttachment);
+                    });
+                }
                 if (!t.deliveries.length) {
                     deliveryBox.appendChild(el('p', 'muted', 'El grupo todavía no entregó.'));
                 } else {
                     t.deliveries.forEach(function (delivery) {
                         deliveryBox.appendChild(el('p', 'muted', 'Entrega #' + delivery.id + ' · ' + delivery.alumno + ' · ' + formatDate(delivery.fecha_entrega.slice(0, 10)) + ' · ' + delivery.estado));
+                        if (delivery.devolucion) deliveryBox.appendChild(el('p', 'delivery-return-note', 'Motivo de devolución: ' + delivery.devolucion));
                         var download = el('a', 'text-button', 'Descargar ' + delivery.nombre);
                         download.href = delivery.descarga;
                         deliveryBox.appendChild(download);
@@ -2074,8 +2305,7 @@ nav {
                 var dateText = col.key === 'done' ? '✓ Finalizado' : (t.date ? '📅 ' + formatDate(t.date) : 'Sin fecha');
                 var date = el('span', 'card-date' + (col.key !== 'done' && isOverdue(t.date) ? ' overdue' : ''), dateText);
                 footer.appendChild(date);
-
-                var review = el('button', 'text-button', t.groupEvaluation ? 'Ver / editar evaluación grupal e individual' : 'Evaluar grupo e integrantes');
+                var review = el('button', 'text-button', 'Ver historial y dejar devoluci?n');
                 review.type = 'button';
                 review.dataset.gradeTaskId = t.id;
                 footer.appendChild(review);
@@ -2084,6 +2314,19 @@ nav {
                 if (t.groupEvaluation) {
                     card.appendChild(el('p', 'task-grade', 'Evaluación grupal: ' + (t.groupEvaluation.calificacion || 'Sin nota')));
                     if (t.groupEvaluation.comentario) card.appendChild(el('p', 'task-feedback', t.groupEvaluation.comentario));
+                }
+                if (t.feedbackHistory && t.feedbackHistory.length) {
+                    var history = el('div', 'project-feedback-history');
+                    history.appendChild(el('strong', null, 'Historial de devoluciones de la tarea'));
+                    t.feedbackHistory.forEach(function (entry) {
+                        if (entry.anulada) return;
+                        var feedback = el('article', 'project-feedback-entry');
+                        feedback.appendChild(el('strong', null, entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+                        if (entry.comentario) feedback.appendChild(el('p', null, entry.comentario));
+                        if (entry.calificacion !== '') feedback.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
+                        history.appendChild(feedback);
+                    });
+                    card.appendChild(history);
                 }
                 if (t.grade) card.appendChild(el('p', 'muted', 'Calificación histórica de tarea: ' + t.grade));
                 column.appendChild(card);
@@ -2183,8 +2426,83 @@ nav {
         });
     }
 
+    function editTaskFeedback(entry) {
+        editingEvaluationId = entry.id;
+        $('evaluationTaskTitle').textContent = 'Editar devolución de ' + evaluationTask.title;
+        $('evaluationGrade').value = entry.calificacion || '';
+        $('evaluationFeedback').value = entry.comentario || '';
+        $('evaluationError').textContent = '';
+        $('evaluationForm').querySelector('[type="submit"]').textContent = 'Guardar cambios';
+    }
+
+    function renderTaskEvaluationHistory(task) {
+        var box = $('taskEvaluationHistory');
+        box.replaceChildren(el('h3', null, 'Historial de devoluciones'));
+        if (!task.feedbackHistory || !task.feedbackHistory.length) {
+            box.appendChild(el('p', 'muted', 'Todavía no hay devoluciones.'));
+            return;
+        }
+        task.feedbackHistory.forEach(function (entry) {
+            var item = el('article', 'project-feedback-entry');
+            item.appendChild(el('strong', null, (entry.tipo === 'individual' ? 'Individual · ' + entry.alumno : 'Grupal') + ' · ' + entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+            if (entry.anulada) item.appendChild(el('p', 'muted', 'Versión anterior o devolución eliminada.'));
+            if (entry.comentario) item.appendChild(el('p', null, entry.comentario));
+            if (entry.calificacion !== '') item.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
+            if (entry.puede_editar) {
+                var actions = el('div', 'modal-actions');
+                var edit = el('button', 'text-button', 'Editar');
+                edit.type = 'button';
+                edit.addEventListener('click', function () { editTaskFeedback(entry); });
+                var remove = el('button', 'danger-button', 'Eliminar');
+                remove.type = 'button';
+                remove.addEventListener('click', function () {
+                    if (!window.confirm('¿Eliminar esta devolución?')) return;
+                    requestJson('/proyectos/api/devoluciones/' + entry.id + '/', { method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() } })
+                        .then(function () { $('evaluationModal').close(); return refreshEvaluationProject('Devolución eliminada.'); })
+                        .catch(function (error) { $('evaluationError').textContent = error.message; });
+                });
+                actions.append(edit, remove);
+                item.appendChild(actions);
+            }
+            box.appendChild(item);
+        });
+    }
+
+    function showTeacherTaskDetail(task) {
+        var box = $('teacherTaskDetailContent');
+        box.replaceChildren();
+        box.appendChild(el('p', 'muted', currentProject().name + ' · ' + currentProject().members.join(', ')));
+        box.appendChild(el('p', null, task.desc || 'Sin descripción.'));
+        box.appendChild(el('p', 'muted', 'Creada: ' + formatDate(task.createdAt ? task.createdAt.slice(0, 10) : '') + ' · Entrega: ' + (task.date ? formatDate(task.date) : 'Sin fecha') + ' · Estado: ' + task.column));
+        box.appendChild(el('h3', null, 'Archivos adjuntos'));
+        (task.attachments || []).forEach(function (file) {
+            var link = el('a', 'text-button', 'Abrir ' + file.nombre);
+            link.href = file.abrir; link.target = '_blank'; link.rel = 'noopener noreferrer'; box.appendChild(link);
+        });
+        task.deliveries.forEach(function (delivery) {
+            var link = el('a', 'text-button', 'Descargar ' + delivery.nombre);
+            link.href = delivery.descarga; box.appendChild(link);
+        });
+        box.appendChild(el('h3', null, 'Devoluciones y calificaciones'));
+        (task.feedbackHistory || []).filter(function (entry) { return !entry.anulada; }).forEach(function (entry) {
+            var row = el('article', 'project-feedback-entry');
+            row.appendChild(el('strong', null, entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+            if (entry.comentario) row.appendChild(el('p', null, entry.comentario));
+            if (entry.calificacion !== '') row.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
+            box.appendChild(row);
+        });
+        $('teacherTaskDetailTitle').textContent = task.title;
+        $('teacherTaskDetailModal').showModal();
+    }
+
     function initKanban() {
         $('kanbanBoard').addEventListener('click', function (event) {
+            var details = event.target.closest('[data-view-task-id]');
+            if (details) {
+                var detailTask = currentProject().tasks.filter(function (item) { return item.id === Number(details.dataset.viewTaskId); })[0];
+                if (detailTask) showTeacherTaskDetail(detailTask);
+                return;
+            }
             var button = event.target.closest('[data-grade-task-id]');
             if (!button) return;
             var task = currentProject().tasks.filter(function (item) {
@@ -2192,11 +2510,14 @@ nav {
             })[0];
             if (!task) return;
             evaluationTask = task;
+            editingEvaluationId = null;
             $('evaluationTaskTitle').textContent = task.title;
-            $('evaluationGrade').value = task.groupEvaluation ? task.groupEvaluation.calificacion : '';
-            $('evaluationFeedback').value = task.groupEvaluation ? task.groupEvaluation.comentario : '';
+            $('evaluationGrade').value = '';
+            $('evaluationFeedback').value = '';
             $('evaluationError').textContent = '';
-            $('deleteGroupEvaluationBtn').hidden = !task.groupEvaluation;
+            $('deleteGroupEvaluationBtn').hidden = true;
+            $('evaluationForm').querySelector('[type="submit"]').textContent = 'Publicar devolución';
+            renderTaskEvaluationHistory(task);
             renderIndividualEvaluations(task);
             $('evaluationModal').showModal();
         });
@@ -2213,12 +2534,19 @@ nav {
                 calificacion: $('evaluationGrade').value,
                 comentario: $('evaluationFeedback').value.trim()
             };
-            requestJson('/tareas/api/' + evaluationTask.id + '/evaluaciones/grupal/', {
-                method: 'POST',
+            if (!payload.calificacion && !payload.comentario) {
+                $('evaluationError').textContent = 'Escribe un comentario o una calificaci\u00f3n.';
+                save.disabled = false;
+                save.textContent = originalLabel;
+                return;
+            }
+            requestJson(editingEvaluationId ? '/proyectos/api/devoluciones/' + editingEvaluationId + '/' : '/tareas/api/' + evaluationTask.id + '/evaluaciones/grupal/', {
+                method: editingEvaluationId ? 'PATCH' : 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
                 body: JSON.stringify(payload)
             }).then(function () {
                 $('evaluationModal').close();
+                editingEvaluationId = null;
                 return refreshEvaluationProject('Evaluación grupal guardada.');
             }).catch(function (error) {
                 $('evaluationError').textContent = error.message || 'No se pudo guardar la evaluación.';
@@ -2258,6 +2586,7 @@ nav {
             var text = el('div');
             text.appendChild(el('strong', null, d.name));
             text.appendChild(el('span', null, 'Subido por ' + d.author + ' • ' + d.when));
+            text.appendChild(el('span', 'document-review-state', 'Revisión: ' + reviewStateLabel(d.reviewState)));
             info.appendChild(text);
             card.appendChild(info);
 
@@ -2267,6 +2596,7 @@ nav {
             card.appendChild(btn);
             if (d.feedback) card.appendChild(el('p', 'muted', 'Retroalimentación guardada: ' + d.feedback));
             if (d.grade) card.appendChild(el('p', 'muted', 'Calificación: ' + d.grade));
+            card.appendChild(makeDocumentReviewControl({ id: d.id, titulo: d.name, estado_revision: d.reviewState }));
 
             list.appendChild(card);
         });
@@ -2280,6 +2610,10 @@ nav {
         docs.forEach(function (doc) {
             var card = el('details', 'document-card');
             card.appendChild(el('summary', null, doc.titulo + ' · ' + (doc.proyecto || 'Personal')));
+            if (doc.proyecto_id) {
+                card.appendChild(el('span', 'document-review-state', 'Revisión: ' + reviewStateLabel(doc.estado_revision)));
+                card.appendChild(makeDocumentReviewControl(doc));
+            }
             var preview = el('div', 'doc-content-preview');
             renderTeacherDocumentContent(doc.contenido, preview);
             card.appendChild(preview);
@@ -2359,14 +2693,115 @@ nav {
         });
     }
 
+    var teacherDocumentSelection = null;
+    var teacherDocumentFonts = ['Arial', 'Georgia', 'Times New Roman', 'Verdana', 'Tahoma', 'Courier New'];
+    var teacherDocumentSizes = [10, 12, 14, 16, 18, 24, 32, 48];
+
+    function teacherRun(text, style) {
+        style = style || {};
+        return { text: text, bold: Boolean(style.bold), italic: Boolean(style.italic), font: style.font || 'Arial', size: style.size || 16 };
+    }
+
+    function renderTeacherDocumentContent(content) {
+        var editor = $('teacherDocContent'); var model;
+        try { model = JSON.parse(content || ''); if (!model || model.format !== 'eduflow.rich-text' || model.version !== 1 || !Array.isArray(model.blocks)) throw new Error('plain text'); }
+        catch (_) { model = { blocks: String(content || '').split('\n').map(function (text) { return { type: 'paragraph', align: 'left', runs: [teacherRun(text)] }; }) }; }
+        editor.replaceChildren();
+        model.blocks.forEach(function (block) {
+            var paragraph = document.createElement('p'); paragraph.style.textAlign = ['left', 'center', 'right', 'justify'].indexOf(block.align) >= 0 ? block.align : 'left';
+            (block.runs || [teacherRun('')]).forEach(function (run) {
+                var node = document.createTextNode(String(run.text || ''));
+                if (run.italic) { var em = document.createElement('em'); em.appendChild(node); node = em; }
+                if (run.bold) { var strong = document.createElement('strong'); strong.appendChild(node); node = strong; }
+                var span = document.createElement('span'); span.style.fontFamily = teacherDocumentFonts.indexOf(run.font) >= 0 ? run.font : 'Arial';
+                span.style.fontSize = teacherDocumentSizes.indexOf(Number(run.size)) >= 0 ? Number(run.size) + 'px' : '16px';
+                span.appendChild(node); paragraph.appendChild(span);
+            });
+            editor.appendChild(paragraph);
+        });
+        if (!model.blocks.length) editor.appendChild(document.createElement('p'));
+        teacherDocumentSelection = null;
+    }
+
+    function serializeTeacherDocumentContent() {
+        var editor = $('teacherDocContent');
+        var blocks = Array.prototype.map.call(editor.childNodes, function (node) {
+            var paragraph = node.nodeType === 1 && ['P', 'DIV'].indexOf(node.tagName) >= 0 ? node : null; var runs = [];
+            function walk(current, style) {
+                style = Object.assign({}, style || {});
+                if (current.nodeType === 3) {
+                    var text = (current.nodeValue || '').replace(/\u200b/g, ''); if (!text) return;
+                    var last = runs[runs.length - 1];
+                    if (last && last.bold === style.bold && last.italic === style.italic && last.font === style.font && last.size === style.size) last.text += text;
+                    else runs.push(teacherRun(text, style)); return;
+                }
+                if (current.nodeType !== 1) return;
+                if (current.tagName === 'B' || current.tagName === 'STRONG') style.bold = true;
+                if (current.tagName === 'I' || current.tagName === 'EM') style.italic = true;
+                var font = (current.style.fontFamily || '').replace(/[\"']/g, '').split(',')[0].trim(); var size = Number.parseInt(current.style.fontSize || '', 10);
+                if (teacherDocumentFonts.indexOf(font) >= 0) style.font = font;
+                if (teacherDocumentSizes.indexOf(size) >= 0) style.size = size;
+                if (current.tagName === 'BR') { runs.push(teacherRun('\n', style)); return; }
+                Array.prototype.forEach.call(current.childNodes, function (child) { walk(child, style); });
+            }
+            Array.prototype.forEach.call((paragraph || node).childNodes, function (child) { walk(child, {}); });
+            if (!runs.length) runs.push(teacherRun(''));
+            return { type: 'paragraph', align: paragraph && ['left', 'center', 'right', 'justify'].indexOf(paragraph.style.textAlign) >= 0 ? paragraph.style.textAlign : 'left', runs: runs };
+        });
+        return JSON.stringify({ format: 'eduflow.rich-text', version: 1, blocks: blocks.length ? blocks : [{ type: 'paragraph', align: 'left', runs: [teacherRun('')] }] });
+    }
+
+    function rememberTeacherDocumentSelection() {
+        var selection = window.getSelection(); var editor = $('teacherDocContent');
+        if (selection && selection.rangeCount && editor.contains(selection.anchorNode) && editor.contains(selection.focusNode)) teacherDocumentSelection = selection.getRangeAt(0).cloneRange();
+    }
+
+    function restoreTeacherDocumentSelection() {
+        var editor = $('teacherDocContent'); editor.focus();
+        if (teacherDocumentSelection && editor.contains(teacherDocumentSelection.commonAncestorContainer)) { var selection = window.getSelection(); selection.removeAllRanges(); selection.addRange(teacherDocumentSelection); }
+    }
+
+    function applyTeacherInlineStyle(property, value) {
+        restoreTeacherDocumentSelection(); var selection = window.getSelection(); if (!selection || !selection.rangeCount) return;
+        var range = selection.getRangeAt(0); var span = document.createElement('span'); span.style[property] = value;
+        if (range.collapsed) { span.appendChild(document.createTextNode('\u200b')); range.insertNode(span); var caret = document.createRange(); caret.setStart(span.firstChild, 1); caret.collapse(true); selection.removeAllRanges(); selection.addRange(caret); teacherDocumentSelection = caret.cloneRange(); return; }
+        span.appendChild(range.extractContents()); range.insertNode(span); selection.removeAllRanges(); var selected = document.createRange(); selected.selectNodeContents(span); selection.addRange(selected); teacherDocumentSelection = selected.cloneRange();
+    }
+
+    function initTeacherDocumentToolbar() {
+        var editor = $('teacherDocContent');
+        editor.addEventListener('input', rememberTeacherDocumentSelection);
+        editor.addEventListener('paste', function (event) { event.preventDefault(); document.execCommand('insertText', false, event.clipboardData.getData('text/plain')); });
+        editor.addEventListener('drop', function (event) { event.preventDefault(); document.execCommand('insertText', false, event.dataTransfer.getData('text/plain')); });
+        document.addEventListener('selectionchange', rememberTeacherDocumentSelection);
+        document.querySelectorAll('[data-teacher-format]').forEach(function (button) {
+            button.addEventListener('mousedown', function (event) { event.preventDefault(); });
+            button.addEventListener('click', function () { restoreTeacherDocumentSelection(); document.execCommand(button.dataset.teacherFormat, false); rememberTeacherDocumentSelection(); });
+        });
+        document.querySelectorAll('[data-teacher-align]').forEach(function (button) {
+            button.addEventListener('mousedown', function (event) { event.preventDefault(); });
+            button.addEventListener('click', function () {
+                restoreTeacherDocumentSelection(); var selection = window.getSelection(); var block = selection && selection.anchorNode && (selection.anchorNode.nodeType === 1 ? selection.anchorNode : selection.anchorNode.parentElement);
+                while (block && block !== editor && ['P', 'DIV'].indexOf(block.tagName) < 0) block = block.parentElement;
+                if (!block || block === editor) { block = document.createElement('p'); block.appendChild(document.createElement('br')); editor.appendChild(block); }
+                block.style.textAlign = button.dataset.teacherAlign; rememberTeacherDocumentSelection();
+            });
+        });
+        $('teacherDocFont').addEventListener('change', function (event) { applyTeacherInlineStyle('fontFamily', event.target.value); });
+        $('teacherDocSize').addEventListener('change', function (event) { applyTeacherInlineStyle('fontSize', Number(event.target.value) + 'px'); });
+    }
+
     function applyTeacherDocument(doc) {
         state.editingDocument = doc || null;
         $('teacherDocumentTitle').textContent = doc ? 'Editar documento de catedra' : 'Nuevo documento de catedra';
         $('teacherDocName').value = doc ? doc.titulo : '';
-        $('teacherDocContent').value = doc ? doc.contenido : '';
+        renderTeacherDocumentContent(doc ? doc.contenido : '');
         $('teacherDocProject').value = doc ? (doc.proyecto_id || '') : '';
         $('teacherDocProject').disabled = Boolean(doc);
         $('teacherDocSave').disabled = teacherDocumentSaving || teacherDocumentLoading || Boolean(doc && !doc.puede_editar);
+        var canEdit = !teacherDocumentSaving && !teacherDocumentLoading && (!doc || doc.puede_editar);
+        $('teacherDocContent').contentEditable = String(canEdit);
+        document.querySelectorAll('.teacher-document-toolbar button, .teacher-document-toolbar select').forEach(function (control) { control.disabled = !canEdit; });
     }
 
     function openTeacherDocument(doc) {
@@ -2395,6 +2830,7 @@ nav {
 
     function initTeacherDocuments() {
         $('newTeacherDocument').addEventListener('click', function () { openTeacherDocument(null); });
+        initTeacherDocumentToolbar();
         $('teacherDocumentEditor').addEventListener('close', function () {
             teacherDocumentSession += 1;
             teacherDocumentLoading = false;
@@ -2404,7 +2840,7 @@ nav {
             if (teacherDocumentSaving) return;
             var session = teacherDocumentSession;
             var doc = state.editingDocument ? Object.assign({}, state.editingDocument) : null;
-            var payload = { titulo: $('teacherDocName').value.trim(), contenido: $('teacherDocContent').value };
+            var payload = { titulo: $('teacherDocName').value.trim(), contenido: serializeTeacherDocumentContent() };
             if (doc) {
                 if (teacherConflictDocument) {
                     if (!window.confirm('Compara ambas versiones antes de guardar tu borrador sobre la version actual. Continuar?')) return;
@@ -2414,6 +2850,8 @@ nav {
 
             teacherDocumentSaving = true;
             $('teacherDocSave').disabled = true;
+            $('teacherDocContent').contentEditable = 'false';
+            document.querySelectorAll('.teacher-document-toolbar button, .teacher-document-toolbar select').forEach(function (control) { control.disabled = true; });
             requestJson(doc ? '/documentos/api/' + doc.id + '/' : '/documentos/api/', {
                 method: doc ? 'PATCH' : 'POST',
                 headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
@@ -2436,10 +2874,16 @@ nav {
                 }
             }).then(function () {
                 teacherDocumentSaving = false;
-                $('teacherDocSave').disabled = teacherDocumentLoading || Boolean(state.editingDocument && !state.editingDocument.puede_editar);
+                var canEdit = !state.editingDocument || state.editingDocument.puede_editar;
+                $('teacherDocContent').contentEditable = String(canEdit);
+                document.querySelectorAll('.teacher-document-toolbar button, .teacher-document-toolbar select').forEach(function (control) { control.disabled = !canEdit; });
+                $('teacherDocSave').disabled = !canEdit;
             }, function () {
                 teacherDocumentSaving = false;
-                $('teacherDocSave').disabled = teacherDocumentLoading || Boolean(state.editingDocument && !state.editingDocument.puede_editar);
+                var canEdit = !state.editingDocument || state.editingDocument.puede_editar;
+                $('teacherDocContent').contentEditable = String(canEdit);
+                document.querySelectorAll('.teacher-document-toolbar button, .teacher-document-toolbar select').forEach(function (control) { control.disabled = !canEdit; });
+                $('teacherDocSave').disabled = !canEdit;
             });
         });
         $('teacherDocRestore').addEventListener('click', function () {
@@ -2515,22 +2959,57 @@ nav {
         $('viewProjectsBtn').addEventListener('click', function () {
             document.querySelector('.nav-item[data-section="proyectos"]').click();
         });
-        $('teacherProfileBtn').addEventListener('click', function () { $('teacherProfileModal').showModal(); });
+        $('teacherProfileBtn').addEventListener('click', function () {
+            $('teacherProfileModal').showModal();
+            requestJson('/usuarios/api/perfil/').then(function (result) {
+                var profile = result.perfil;
+                $('profileFirstName').value = profile.nombres || '';
+                $('profileLastName').value = profile.apellidos || '';
+                $('profileEmail').value = profile.correo || '';
+                $('profileDni').value = profile.dni || '';
+                $('profileRole').value = profile.rol === 'profesor' ? 'Profesor' : 'Alumno';
+                $('profileSpecialtyText').value = profile.especialidad || 'Sin registrar';
+                $('profileSpecialtySetup').hidden = Boolean(profile.especialidad);
+                $('saveProfileSpecialty').disabled = Boolean(profile.especialidad);
+                $('profileSpecialtyMessage').textContent = '';
+            }).catch(function (error) { $('profileSpecialtyMessage').textContent = error.message; });
+        });
+        document.querySelectorAll('[data-close-profile]').forEach(function (button) { button.addEventListener('click', function () { $('teacherProfileModal').close(); }); });
+        $('saveProfileSpecialty').addEventListener('click', function () {
+            requestJson('/usuarios/api/perfil/', { method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() }, body: JSON.stringify({ especialidad: $('profileSpecialtySelect').value }) }).then(function (result) {
+                $('profileSpecialtyText').value = result.perfil.especialidad; $('profileSpecialtySetup').hidden = true; toast('Especialidad registrada.');
+            }).catch(function (error) { $('profileSpecialtyMessage').textContent = error.message; });
+        });
+        document.querySelectorAll('[data-toggle-password]').forEach(function (button) {
+            button.addEventListener('click', function () { var field = button.parentElement.querySelector('input'); field.type = field.type === 'password' ? 'text' : 'password'; button.setAttribute('aria-label', field.type === 'password' ? 'Mostrar contraseña' : 'Ocultar contraseña'); });
+        });
+        $('profilePasswordForm').addEventListener('submit', function (event) {
+            event.preventDefault(); var form = event.currentTarget; var message = $('profilePasswordMessage');
+            var current = form.elements.current.value; var next = form.elements.new.value; var confirmation = form.elements.confirmation.value;
+            message.textContent = '';
+            if (next !== confirmation) { message.textContent = 'Las contraseñas nuevas no coinciden.'; return; }
+            var submit = form.querySelector('[type="submit"]'); submit.disabled = true;
+            requestJson('/usuarios/api/cambiar-contrasena/', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() }, body: JSON.stringify({ contrasena_actual: current, nueva_contrasena: next, confirmacion: confirmation }) }).then(function (result) {
+                form.reset(); message.textContent = result.mensaje; toast(result.mensaje);
+            }).catch(function (error) { message.textContent = error.message; }).then(function () { submit.disabled = false; });
+        });
 
-        $('reviewQueue').addEventListener('click', function (event) {
-            var button = event.target.closest('[data-review-project-id]');
-            if (!button) return;
-            var projectId = Number(button.dataset.reviewProjectId);
-            document.querySelector('.nav-item[data-section="proyectos"]').click();
-            openProject(projectId);
-            if (button.dataset.reviewTaskId) {
-                var taskButton = document.querySelector('#kanbanBoard [data-grade-task-id="' + button.dataset.reviewTaskId + '"]');
-                if (taskButton) taskButton.click();
-            } else if (button.dataset.reviewDocId) {
-                switchTab('tab-docs');
-                var docButton = document.querySelector('#projectDocList [data-doc-id="' + button.dataset.reviewDocId + '"]');
-                if (docButton) docButton.click();
-            }
+        document.querySelectorAll('#reviewTaskQueue, #reviewDeliveryQueue, #pendingReviewList').forEach(function (queue) {
+            queue.addEventListener('click', function (event) {
+                var button = event.target.closest('[data-review-project-id]');
+                if (!button) return;
+                var projectId = Number(button.dataset.reviewProjectId);
+                document.querySelector('.nav-item[data-section="proyectos"]').click();
+                openProject(projectId);
+                if (button.dataset.reviewTaskId) {
+                    var taskButton = document.querySelector('#kanbanBoard [data-grade-task-id="' + button.dataset.reviewTaskId + '"]');
+                    if (taskButton) taskButton.click();
+                } else if (button.dataset.reviewDocId) {
+                    switchTab('tab-docs');
+                    var docButton = document.querySelector('#projectDocList [data-doc-id="' + button.dataset.reviewDocId + '"]');
+                    if (docButton) docButton.click();
+                }
+            });
         });
 
         document.querySelectorAll('.tab-btn').forEach(function (btn) {

@@ -46,6 +46,7 @@ def _serializar(documento, usuario=None):
         "colaboradores": [{"id": u.id, "nombre": u.get_full_name() or u.dni} for u in documento.colaboradores.all()],
         "proyecto_id": documento.proyecto_id, "proyecto": documento.proyecto.nombre if documento.proyecto_id else "",
         "version": documento.version, "fecha_actualizacion": documento.fecha_actualizacion.isoformat(),
+        "estado_revision": documento.estado_revision if documento.proyecto_id else None,
         "calificacion": str(documento.calificacion) if documento.calificacion is not None else "",
         "retroalimentacion": documento.retroalimentacion,
         "puede_editar": es_autor or colaboracion_alumno,
@@ -181,7 +182,9 @@ def api_documento(request, pk):
         actual.titulo = titulo.strip()
         actual.contenido = contenido
         actual.version += 1
-        actual.save(update_fields=("titulo", "contenido", "version", "fecha_actualizacion"))
+        if actual.proyecto_id:
+            actual.estado_revision = "pendiente"
+        actual.save(update_fields=("titulo", "contenido", "version", "fecha_actualizacion", "estado_revision"))
     return JsonResponse({"documento": _serializar(actual, request.user)})
 
 
@@ -234,10 +237,35 @@ def api_evaluar_documento(request, pk):
             return JsonResponse({"error": "La devoluci\u00f3n no es v\u00e1lida."}, status=400)
         devolucion.save()
         documento.evaluado_por = request.user
-        documento.save(update_fields=("retroalimentacion", "calificacion", "evaluado_por"))
+        documento.estado_revision = "revisado"
+        documento.save(update_fields=("retroalimentacion", "calificacion", "evaluado_por", "estado_revision"))
 
     return JsonResponse({
         "documento": _serializar(documento, request.user),
         "retroalimentacion": documento.retroalimentacion,
         "calificacion": str(documento.calificacion or ""),
     })
+
+
+@login_required
+@require_http_methods(["PATCH"])
+def api_estado_revision_documento(request, pk):
+    if _rol(request.user) != "profesor":
+        return JsonResponse({"error": "Solo el docente asignado puede actualizar el estado de revisión."}, status=403)
+    data = _json_body(request)
+    if data is None or set(data) != {"estado_revision"}:
+        return JsonResponse({"error": "Envía únicamente el estado de revisión."}, status=400)
+    estado = data.get("estado_revision")
+    if not isinstance(estado, str) or estado not in dict(Documento.ESTADOS_REVISION):
+        return JsonResponse({"error": "El estado de revisión no es válido."}, status=400)
+    with transaction.atomic():
+        documento = get_object_or_404(
+            Documento.objects.select_for_update().select_related("creador", "proyecto").prefetch_related("colaboradores"),
+            pk=pk,
+            proyecto__isnull=False,
+        )
+        if not profesor_autorizado(request.user, documento.proyecto):
+            raise Http404
+        documento.estado_revision = estado
+        documento.save(update_fields=("estado_revision",))
+    return JsonResponse({"documento": _serializar(documento, request.user)})

@@ -223,7 +223,7 @@ def api_proyecto(request, pk):
         try:
             proyecto.delete()
         except ProtectedError:
-            return JsonResponse({"error": "No se puede eliminar un proyecto que ya tiene devoluciones docentes registradas."}, status=409)
+            return JsonResponse({"error": "No se puede eliminar un proyecto que conserva registros académicos asociados."}, status=409)
         return JsonResponse({"eliminado": True})
 
     data = _json_body(request)

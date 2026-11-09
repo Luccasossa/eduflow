@@ -3,11 +3,22 @@ from django.conf import settings
 
 
 class Documento(models.Model):
+    ESTADOS_REVISION = [
+        ("pendiente", "Pendiente de revisión"),
+        ("en_revision", "En revisión"),
+        ("revisado", "Revisado"),
+    ]
+
     titulo = models.CharField(max_length=200)
     contenido = models.TextField(blank=True)
+    estado_revision = models.CharField(
+        max_length=20,
+        choices=ESTADOS_REVISION,
+        default="pendiente",
+    )
     creador = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="documentos_creados"
     )
     colaboradores = models.ManyToManyField(
@@ -17,7 +28,7 @@ class Documento(models.Model):
     )
     proyecto = models.ForeignKey(
         "proyectos.Proyecto",
-        on_delete=models.CASCADE,
+        on_delete=models.PROTECT,
         related_name="documentos",
         null=True,
         blank=True
@@ -34,7 +45,7 @@ class Documento(models.Model):
 
     evaluado_por = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.SET_NULL,
+        on_delete=models.PROTECT,
         null=True,
         blank=True,
         related_name="documentos_evaluados"

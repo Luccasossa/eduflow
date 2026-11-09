@@ -7,11 +7,12 @@
 
     <title>EduFlow - Plataforma Académica</title>
 
-    {% load static %}
+{% load static tz %}
     <link rel="stylesheet" href="{% static 'css/style.css' %}">
 </head>
 
-<body data-grade-max="{{ calificacion_maxima }}">
+{% get_current_timezone as EDUFLOW_TIMEZONE %}
+<body data-grade-max="{{ calificacion_maxima }}" data-timezone="{{ EDUFLOW_TIMEZONE }}">
 
     <!-- BARRA LATERAL -->
 
@@ -56,25 +57,6 @@
 
 <div class="sidebar-bottom">
 
-    <!-- CONFIGURACIÓN -->
-
-    <div class="sidebar-option" id="settingsBtn">
-
-        <div class="sidebar-option-icon settings-icon">
-            ⚙️
-        </div>
-
-        <div class="sidebar-option-text">
-            <strong>Configuración</strong>
-            <span>Personalizá tu experiencia</span>
-        </div>
-
-        <div class="sidebar-option-arrow">
-            →
-        </div>
-
-    </div>
-
     <!-- MODO OSCURO -->
 
     <div class="dark-mode-card">
@@ -106,7 +88,7 @@
 
     <form action="{% url 'usuarios:logout' %}" method="post" class="logout-form">
         {% csrf_token %}
-        <button type="submit" class="nav-item">Cerrar sesión</button>
+        <button type="submit" class="nav-item logout-button"><span aria-hidden="true">↩</span> Cerrar sesión</button>
     </form>
 
     </aside>
@@ -127,19 +109,14 @@
 
             <div class="header-right">
 
-                <button class="icon-button" id="notificationBtn">
-                    🔔
-                    <span class="notification-dot"></span>
-                </button>
-
                 <button class="theme-button" id="themeBtn">
                     🌙
                 </button>
 
-                <div class="profile">
+                <button class="profile profile-trigger" id="profileBtn" type="button" aria-haspopup="dialog" aria-controls="profileModal">
 
                     <div class="avatar">
-                        {{ user.first_name|default:user.dni|slice:":2" }}
+                        {{ user.first_name|default:user.dni|slice:":1" }}{{ user.last_name|default:""|slice:":1" }}
                     </div>
 
                     <div>
@@ -147,7 +124,7 @@
                         <small>Alumno</small>
                     </div>
 
-                </div>
+                </button>
 
             </div>
 
@@ -287,21 +264,14 @@
                     <div class="panel-header">
 
                         <div>
-                            <h3>Actividad reciente</h3>
-                            <p>Últimos cambios</p>
+                            <h3>Documentos recientes</h3>
+                            <p>Últimos documentos actualizados</p>
                         </div>
 
                     </div>
-<div class="activity-list" id="recentActivityList" aria-live="polite"></div>
-
-
-
-
-
-
-
-
-
+                    <div class="activity" id="recentDocumentList" aria-live="polite">
+                        <p class="empty-state">Cargando documentos…</p>
+                    </div>
 
                 </div>
 
@@ -318,7 +288,6 @@
 
                 <div>
                     <h2>Mis tareas</h2>
-                    <p>Organizá tus actividades académicas.</p>
                 </div>
 
                 <button class="primary-button" data-new-task>
@@ -337,19 +306,12 @@
                         <option value="completada">Finalizado</option>
                     </select>
                 </label>
-                <label>Prioridad
-                    <select id="filterTaskPriority">
-                        <option value="">Todas</option>
-                        <option value="baja">Baja</option>
-                        <option value="media">Media</option>
-                        <option value="alta">Alta</option>
-                    </select>
-                </label>
                 <label>Desde <input type="date" id="filterTaskFrom"></label>
                 <label>Hasta <input type="date" id="filterTaskTo"></label>
                 <button type="button" class="secondary-button" id="clearTaskFilters">Limpiar</button>
             </div>
             <div class="kanban" id="personalKanban" aria-live="polite"></div>
+            <p class="form-error" id="taskFilterError" role="alert"></p>
 </section>
 
 
@@ -382,7 +344,7 @@
             <div class="section-header">
 
                 <div>
-                    <h2>Archivos</h2>
+                    <h2>Archivos de cursada</h2>
                     <p>Guardá y organizá tus archivos académicos.</p>
                 </div>
 
@@ -393,34 +355,15 @@
             </div>
 
 
-            <div class="storage">
-
-                <div class="storage-info">
-
-                    <span>Almacenamiento utilizado</span>
-
-                    <strong>
-                        <span id="storageUsage">Calculando almacenamiento…</span>
-                    </strong>
-
-                </div>
-
-                <div class="storage-bar">
-                    <div></div>
-                </div>
-
-            </div>
-
-
+            <div class="storage" aria-live="polite"><span>Almacenamiento utilizado</span><strong id="storageUsage">Calculando almacenamiento…</strong></div>
             <div class="file-toolbar">
                 <label>Proyecto <select id="fileProjectFilter"><option value="">Todos mis archivos</option></select></label>
-                <label>Buscar <input type="search" id="fileSearchInput" placeholder="Nombre del archivo" autocomplete="off"></label>
                 <label>Carpeta <select id="fileFolderFilter"><option value="">Todas las carpetas</option></select></label>
                 <button type="button" class="secondary-button" id="newFolderBtn">Nueva carpeta</button>
             </div>
             <input type="file" id="academicFileInput" accept=".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.txt,.csv" hidden>
             <div class="file-grid" id="academicFileList" aria-live="polite"></div>
-            <p class="muted">PDF, DOCX, XLSX, PPTX, OpenDocument, TXT y CSV; máximo 15 MB por archivo.</p>
+            <p class="muted">PDF, DOCX, XLSX, PPTX, OpenDocument, TXT y CSV; máximo 10 MB por archivo.</p>
 
         </section>
 
@@ -447,7 +390,75 @@
 
         </section>
 
+        <footer class="eduflow-footer">
+        <p>© 2026 EduFlow. Todos los derechos reservados.</p>
+        <p><strong>Desarrollado por:</strong> Carla Juliana Fernandez, Lucca Julian Sosa Alvarenga y Aarón Suárez.</p>
+        <p><strong>Institución:</strong> Universidad Económica Nacional IEN</p>
+        <p><strong>Carrera:</strong> Tecnicatura en Desarrollo de Software</p>
+        <p><strong>Año:</strong> Primer Año.</p>
+    </footer>
     </main>
+
+
+    <dialog class="modal profile-modal" id="profileModal" aria-labelledby="profileTitle">
+        <div>
+            <div class="modal-header"><h2 id="profileTitle">Mi perfil</h2><button type="button" class="close-modal" data-close-profile aria-label="Cerrar">×</button></div>
+            <p class="muted">Datos de tu cuenta autenticada.</p>
+            <div class="profile-fields">
+                <label>Nombres<input id="profileFirstName" value="{{ user.first_name }}" disabled></label>
+                <label>Apellidos<input id="profileLastName" value="{{ user.last_name }}" disabled></label>
+                <label>Correo electrónico<input id="profileEmail" value="{{ user.email|default:'' }}" disabled></label>
+                <label>DNI<input id="profileDni" value="{{ user.dni }}" disabled></label>
+                <label>Rol<input id="profileRole" value="Alumno" disabled></label>
+                <label>Especialidad<input id="profileSpecialtyText" value="Cargando…" disabled></label>
+            </div>
+            <section id="profileSpecialtySetup" class="profile-password-unavailable" hidden>
+                <h3>Registrar especialidad</h3>
+                <label for="profileSpecialtySelect">Especialidad</label>
+                <select id="profileSpecialtySelect"><option value="">Seleccioná una opción</option><option value="IPP">IPP</option><option value="GAO">GAO</option><option value="TP">TP</option></select>
+                <p id="profileSpecialtyMessage" class="form-error" role="status"></p>
+                <button type="button" class="primary-button" id="saveProfileSpecialty">Guardar especialidad</button>
+            </section>
+            <form id="profilePasswordForm" class="profile-password-unavailable" aria-labelledby="profilePasswordTitle">
+                <h3 id="profilePasswordTitle">Cambio de contraseña</h3>
+                <label>Contraseña actual<span class="password-field"><input name="current" type="password" autocomplete="current-password" required><button type="button" data-toggle-password aria-label="Mostrar contraseña">◉</button></span></label>
+                <label>Nueva contraseña<span class="password-field"><input name="new" type="password" autocomplete="new-password" required><button type="button" data-toggle-password aria-label="Mostrar contraseña">◉</button></span></label>
+                <label>Confirmar nueva contraseña<span class="password-field"><input name="confirmation" type="password" autocomplete="new-password" required><button type="button" data-toggle-password aria-label="Mostrar contraseña">◉</button></span></label>
+                <p id="profilePasswordMessage" class="form-error" role="status"></p>
+                <button type="submit" class="primary-button">Cambiar contraseña</button>
+            </form>
+            <div class="modal-actions"><button type="button" class="secondary-button" data-close-profile>Cerrar</button></div>
+        </div>
+    </dialog>
+    <dialog class="modal project-task-board-modal" id="projectTaskBoardModal" aria-labelledby="projectTaskBoardTitle">
+        <div class="modal-header"><h2 id="projectTaskBoardTitle">Tareas del proyecto</h2><button type="button" class="close-modal" id="closeProjectTaskBoard" aria-label="Cerrar">×</button></div>
+        <p id="projectTaskBoardMeta" class="muted"></p>
+        <div class="project-task-board-actions"><button type="button" class="secondary-button" id="backFromProjectTasks">Volver a proyectos</button><button type="button" class="primary-button" id="newProjectBoardTask">+ Nueva tarea</button></div>
+        <div class="kanban project-task-board" id="projectTaskBoard" aria-live="polite"></div>
+    </dialog>
+    <dialog class="modal project-documents-modal" id="projectDocumentsModal" aria-labelledby="projectDocumentsTitle">
+        <div class="modal-header">
+            <h2 id="projectDocumentsTitle">Documentos del proyecto</h2>
+            <button type="button" class="close-modal" id="closeProjectDocuments" aria-label="Cerrar">×</button>
+        </div>
+        <p id="projectDocumentsMeta" class="muted"></p>
+        <div class="project-documents-actions">
+            <button type="button" class="secondary-button" id="backFromProjectDocuments">Volver a proyectos</button>
+            <div>
+                <input type="file" id="projectResourceFileInput" accept=".pdf,.docx,.xlsx,.pptx,.odt,.ods,.odp,.txt,.csv" hidden>
+                <button type="button" class="secondary-button" id="uploadProjectResource">Subir documento</button>
+                <button type="button" class="primary-button" id="newProjectDocument">Crear documento</button>
+            </div>
+        </div>
+        <section aria-labelledby="projectFilesHeading">
+                <h3 id="projectFilesHeading">Documentos subidos al proyecto</h3>
+            <div class="file-grid" id="projectResourceFiles" aria-live="polite"></div>
+        </section>
+        <section aria-labelledby="projectDocsHeading">
+            <h3 id="projectDocsHeading">Documentos creados</h3>
+            <div class="document-list" id="projectResourceDocuments" aria-live="polite"></div>
+        </section>
+    </dialog>
 
 
     <!-- MODAL NUEVA TAREA -->
@@ -456,7 +467,7 @@
 
         <div class="modal">
 
-            <button class="close-modal" id="closeModal">
+            <button type="button" class="close-modal" id="closeTaskModalTop">
                 ×
             </button>
 
@@ -468,12 +479,6 @@
             <textarea id="taskDescription" maxlength="20000" rows="3"></textarea>
             <label for="taskDueDate">Fecha de entrega</label>
             <input type="date" id="taskDueDate">
-            <label for="priorityInput">Prioridad automática</label>
-            <select id="priorityInput" disabled>
-                <option value="baja">Baja</option>
-                <option value="media" selected>Media</option>
-                <option value="alta">Alta</option>
-            </select>
             <label for="taskStateInput">Estado</label>
             <select id="taskStateInput">
                 <option value="pendiente">Por hacer</option>
@@ -516,20 +521,6 @@
         </div>
     </div>
 
-    <div class="modal-overlay" id="taskDetailModal" role="dialog" aria-modal="true" aria-labelledby="taskDetailTitle">
-        <div class="modal detail-modal">
-            <button type="button" class="close-modal" data-close-task-detail aria-label="Cerrar">×</button>
-            <div id="taskDetailContent"></div>
-        </div>
-    </div>
-
-    <div class="modal-overlay" id="projectDetailModal" role="dialog" aria-modal="true" aria-labelledby="projectDetailTitle">
-        <div class="modal detail-modal">
-            <button type="button" class="close-modal" data-close-project-detail aria-label="Cerrar">×</button>
-            <div id="projectDetailContent"></div>
-        </div>
-    </div>
-
     <div class="modal-overlay" id="documentModal" role="dialog" aria-modal="true" aria-labelledby="documentModalTitle">
         <div class="modal document-editor">
             <button type="button" class="close-modal" data-close-document aria-label="Cerrar">×</button>
@@ -539,7 +530,29 @@
             <label for="documentProjectInput">Proyecto (opcional)</label>
             <select id="documentProjectInput"><option value="">Documento personal</option></select>
             <label for="documentContentInput">Contenido</label>
-            <textarea id="documentContentInput" rows="14" maxlength="1000000"></textarea>
+            <div class="document-toolbar" role="toolbar" aria-label="Formato del documento">
+                <label>Fuente <select id="documentFontFamily" aria-label="Familia tipográfica">
+                    <option value="Arial">Arial</option><option value="Georgia">Georgia</option>
+                    <option value="'Times New Roman'">Times New Roman</option><option value="Verdana">Verdana</option>
+                    <option value="Tahoma">Tahoma</option><option value="'Courier New'">Courier New</option>
+                </select></label>
+                <label>Tamaño <select id="documentFontSize" aria-label="Tamaño de letra">
+                    <option value="10">10</option><option value="12">12</option><option value="14">14</option>
+                    <option value="16" selected>16</option><option value="18">18</option><option value="24">24</option>
+                    <option value="32">32</option><option value="48">48</option>
+                </select></label>
+                <button type="button" data-format="bold" aria-label="Negrita"><strong>N</strong></button>
+                <button type="button" data-format="italic" aria-label="Cursiva"><em>K</em></button>
+                <button type="button" data-align="left" aria-label="Alinear a la izquierda">⇤</button>
+                <button type="button" data-align="center" aria-label="Centrar">↔</button>
+                <button type="button" data-align="right" aria-label="Alinear a la derecha">⇥</button>
+                <button type="button" data-align="justify" aria-label="Justificar">☰</button>
+            </div>
+            <div id="documentContentInput" class="document-writing-area" contenteditable="true" role="textbox" aria-multiline="true" aria-label="Contenido del documento"></div>
+            <div id="documentInvalidContent" class="document-invalid-content" role="alert" hidden>
+                <p>Este contenido no se puede abrir como documento enriquecido. El texto original se conserva para recuperarlo.</p>
+                <pre id="documentInvalidContentText"></pre>
+            </div>
             <p id="documentFormError" class="form-error" role="alert"></p>
             <div id="documentConflict" class="document-conflict" hidden>
                 <strong>Hay una versión guardada más reciente.</strong>

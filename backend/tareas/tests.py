@@ -83,7 +83,7 @@ class TablerosTests(TestCase):
     def test_prioridad_automatica_en_los_limites_requeridos(self):
         self.client.force_login(self.alumno)
         today = timezone.localdate()
-        for days, expected in ((25, "baja"), (20, "media"), (10, "media"), (5, "media"), (4, "alta"), (1, "alta"), (-1, "alta")):
+        for days, expected in ((20, "baja"), (14, "baja"), (13, "media"), (8, "media"), (7, "alta"), (0, "alta"), (-1, "alta")):
             response = self.json_post(reverse("api_tareas"), {
                 "titulo": f"Vencimiento {days}",
                 "fecha_vencimiento": (today + timedelta(days=days)).isoformat(),
@@ -162,14 +162,14 @@ class TablerosTests(TestCase):
         self.client.force_login(self.ajeno)
         self.assertEqual(self.client.get(reverse("api_proyecto", args=[proyecto.id])).status_code, 404)
 
-    def test_creador_puede_eliminar_su_proyecto_y_tareas_de_equipo(self):
+    def test_creador_no_puede_eliminar_proyecto_con_tareas_y_se_preserva_el_historial(self):
         proyecto = self.crear_proyecto()
-        Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Tarea asociada")
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Tarea asociada")
         self.client.force_login(self.alumno)
         response = self.client.delete(reverse("api_proyecto", args=[proyecto.id]))
-        self.assertEqual(response.status_code, 200)
-        self.assertFalse(Proyecto.objects.filter(pk=proyecto.pk).exists())
-        self.assertFalse(Tarea.objects.filter(proyecto_id=proyecto.pk).exists())
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(Proyecto.objects.filter(pk=proyecto.pk).exists())
+        self.assertTrue(Tarea.objects.filter(pk=tarea.pk, proyecto=proyecto).exists())
 
     def test_integrante_colabora_en_tareas_y_progreso_se_persiste(self):
         proyecto = self.crear_proyecto()
@@ -323,6 +323,60 @@ class TablerosTests(TestCase):
         data = {"archivo": SimpleUploadedFile("x.pdf", b"%PDF-1.7")}
         self.assertEqual(self.client.post(url, data).status_code, 201)
         self.assertEqual(self.client.post(url, {"archivo": SimpleUploadedFile("y.pdf", b"%PDF-1.7")}).status_code, 409)
+
+    def test_docente_rechaza_y_alumno_reentrega_sin_perder_intentos(self):
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe corregible")
+        deliveries_url = reverse("api_entregas", args=[tarea.pk])
+        self.client.force_login(self.companero)
+        first_response = self.client.post(deliveries_url, {
+            "archivo": SimpleUploadedFile("inicial.pdf", b"%PDF-1.7 inicial"),
+            "alumno_id": self.ajeno.pk,
+        })
+        self.assertEqual(first_response.status_code, 201, first_response.content)
+        first = Entrega.objects.get(pk=first_response.json()["entrega"]["id"])
+        self.assertEqual(first.alumno_id, self.companero.pk)
+        first_file_name = first.archivo.name
+        self.assertTrue(first.archivo.storage.exists(first_file_name))
+
+        review_url = reverse("api_revision_entrega", args=[tarea.pk, first.pk])
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.post(review_url, data=json.dumps({"estado": "rechazada", "devolucion": "Motivo"}), content_type="application/json").status_code, 403)
+        self.client.force_login(self.profesor)
+        missing_reason = self.client.post(review_url, data=json.dumps({"estado": "rechazada", "devolucion": ""}), content_type="application/json")
+        self.assertEqual(missing_reason.status_code, 400)
+        rejected = self.client.post(review_url, data=json.dumps({"estado": "rechazada", "devolucion": "Faltan fuentes."}), content_type="application/json")
+        self.assertEqual(rejected.status_code, 200, rejected.content)
+        first.refresh_from_db()
+        self.assertEqual(first.estado, "rechazada")
+        self.assertEqual(first.devolucion, "Faltan fuentes.")
+
+        self.client.force_login(self.companero)
+        history = self.client.get(deliveries_url).json()["entregas"]
+        self.assertEqual(history[0]["devolucion"], "Faltan fuentes.")
+        second_response = self.client.post(deliveries_url, {"archivo": SimpleUploadedFile("corregido.pdf", b"%PDF-1.7 corregido")})
+        self.assertEqual(second_response.status_code, 201, second_response.content)
+        second = Entrega.objects.get(pk=second_response.json()["entrega"]["id"])
+        self.assertEqual(second.entrega_anterior_id, first.pk)
+        self.assertEqual(second.alumno_id, self.companero.pk)
+        self.assertEqual(Entrega.objects.filter(tarea=tarea).count(), 2)
+        first.refresh_from_db()
+        self.assertEqual(first.estado, "rechazada")
+        self.assertEqual(first.devolucion, "Faltan fuentes.")
+        self.assertTrue(first.archivo.storage.exists(first_file_name))
+        self.assertEqual(len(self.client.get(deliveries_url).json()["entregas"]), 2)
+        self.assertEqual(self.client.post(deliveries_url, {"archivo": SimpleUploadedFile("extra.pdf", b"%PDF-1.7 extra")}).status_code, 409)
+
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.post(review_url, data=json.dumps({"estado": "aprobada"}), content_type="application/json").status_code, 409)
+        other_project = Proyecto.objects.create(nombre="Proyecto ajeno", creador=self.ajeno)
+        other_task = Tarea.objects.create(creador=self.ajeno, proyecto=other_project, titulo="Otra tarea")
+        self.assertEqual(self.client.post(
+            reverse("api_revision_entrega", args=[other_task.pk, second.pk]),
+            data=json.dumps({"estado": "rechazada", "devolucion": "Ajena"}),
+            content_type="application/json",
+        ).status_code, 404)
 
     def test_descarga_privada_autorizada_y_revocada_al_retirar_integrante(self):
         proyecto = self.crear_proyecto()

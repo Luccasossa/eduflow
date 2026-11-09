@@ -22,6 +22,11 @@ class PerfilUsuarioInline(admin.StackedInline):
     can_delete = False
     extra = 1
 
+    def get_readonly_fields(self, request, obj=None):
+        if obj and hasattr(obj, "perfil") and obj.perfil.especialidad:
+            return ("especialidad",)
+        return super().get_readonly_fields(request, obj)
+
 
 @admin.register(Usuario)
 class UsuarioAdmin(UserAdmin):

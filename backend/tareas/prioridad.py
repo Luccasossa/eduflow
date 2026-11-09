@@ -7,7 +7,7 @@ def prioridad_para(fecha):
     if not fecha:
         return "media"
     dias = (fecha - localdate()).days
-    return "baja" if dias > 20 else "media" if dias >= 5 else "alta"
+    return "baja" if dias >= 14 else "media" if dias >= 8 else "alta"
 
 
 def sincronizar_prioridades(tareas):

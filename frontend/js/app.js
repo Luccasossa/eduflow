@@ -25,6 +25,8 @@
     let editingProject = null;
     let projectSaveInFlight = false;
     let academicFiles = [];
+    let fileFolders = {};
+    let fileManagement = {};
     let fileListRequest = 0;
     let folders = [];
     let academicDocuments = [];
@@ -126,6 +128,8 @@
             const result = await api(`/archivos/api/${params.size ? `?${params}` : ""}`);
             if (requestId !== fileListRequest) return;
             academicFiles = result.archivos;
+            fileFolders = result.carpeta_por_archivo || {};
+            fileManagement = result.puede_administrar_por_archivo || {};
             renderFiles();
         } catch (error) { if (requestId === fileListRequest) notify(error.message, true); }
     }
@@ -135,17 +139,47 @@
         if (!list) return;
         list.replaceChildren();
         if (!academicFiles.length) list.appendChild(make("p", "empty-state", "No hay archivos disponibles en esta vista."));
+        const used = academicFiles.reduce((total, file) => total + Number(file.tamano || 0), 0);
+        $("#storageUsage")?.replaceChildren(document.createTextNode(`${formatBytes(used)} en esta vista`));
         academicFiles.forEach((file) => {
             const card = make("article", "file-card");
             const ext = file.nombre.split(".").pop().toUpperCase();
             card.appendChild(make("div", `file-icon ${ext.toLowerCase()}`, ext));
             card.appendChild(make("strong", "", file.nombre));
             card.appendChild(make("span", "", `${formatBytes(file.tamano)} · ${dateLabel(file.fecha_subida.slice(0, 10))}`));
+            const folder = fileFolders[String(file.id)];
+            if (folder?.nombre) card.appendChild(make("span", "", `Carpeta: ${folder.nombre}`));
             if (file.proyecto_id) card.appendChild(make("span", "", `Proyecto: ${projects.find((p) => p.id === file.proyecto_id)?.nombre || "Compartido"}`));
             const link = make("a", "text-button", "Descargar");
             link.href = file.descarga;
             link.setAttribute("aria-label", `Descargar ${file.nombre}`);
             card.appendChild(link);
+            if (fileManagement[String(file.id)]) {
+                const folderSelect = document.createElement("select");
+                folderSelect.setAttribute("aria-label", `Mover ${file.nombre} a una carpeta`);
+                folderSelect.add(new Option("Sin carpeta", ""));
+                folders.forEach((item) => folderSelect.add(new Option(item.nombre, String(item.id))));
+                folderSelect.value = folder?.id ? String(folder.id) : "";
+                const move = make("button", "text-button", "Mover");
+                move.type = "button";
+                move.addEventListener("click", async () => {
+                    const data = new FormData(); data.append("carpeta", folderSelect.value);
+                    try {
+                        const response = await fetch(`/archivos/api/${file.id}/carpeta/`, { method: "POST", headers: { "X-CSRFToken": csrf, Accept: "application/json" }, body: data });
+                        const result = await response.json();
+                        if (!response.ok) throw new Error(result.error || "No se pudo mover el archivo.");
+                        notify("Archivo movido correctamente."); await loadFiles();
+                    } catch (error) { notify(error.message, true); }
+                });
+                const remove = make("button", "text-button danger-text", "Eliminar");
+                remove.type = "button";
+                remove.addEventListener("click", async () => {
+                    if (!window.confirm(`¿Eliminar ${file.nombre}?`)) return;
+                    try { await api(`/archivos/api/${file.id}/eliminar/`, "DELETE", {}); notify("Archivo eliminado."); await loadFiles(); }
+                    catch (error) { notify(error.message, true); }
+                });
+                card.append(folderSelect, move, remove);
+            }
             list.appendChild(card);
         });
     }
@@ -174,6 +208,8 @@
             summary.appendChild(make("strong", "", documento.titulo));
             summary.appendChild(make("span", "", `${documento.proyecto || "Documento personal"} · Guardado ${dateLabel(documento.fecha_actualizacion.slice(0, 10))}`));
             card.appendChild(summary);
+            card.appendChild(make("span", "document-review-state", documento.estado_revision ? `Revisión: ${documentReviewLabel(documento.estado_revision)}` : "Sin revisión docente"));
+            if (documento.retroalimentacion) card.appendChild(make("p", "", `Devolución docente: ${documento.retroalimentacion}`));
             card.appendChild(make("span", "collaborators", documento.colaboradores.map((person) => person.nombre).join(", ")));
             const open = make("button", "text-button", documento.puede_editar ? "Abrir y editar" : "Ver");
             open.type = "button";
@@ -182,6 +218,46 @@
             list.appendChild(card);
         });
         renderRecentDocuments();
+    }
+
+    function documentReviewLabel(state) {
+        return ({ pendiente: "Pendiente de revisión", en_revision: "En revisión", revisado: "Revisado" })[state] || "Sin estado";
+    }
+
+    function makeDeliveryUpload(task, isRetry) {
+        const wrapper = make("div", "delivery-submit-form");
+        const file = document.createElement("input");
+        file.type = "file";
+        file.accept = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg";
+        file.setAttribute("aria-label", `${isRetry ? "Archivo corregido para volver a entregar" : "Archivo para entregar"}: ${task.titulo}`);
+        const submit = make("button", "text-button", isRetry ? "Volver a entregar" : "Entregar archivo por el grupo");
+        submit.type = "button";
+        submit.disabled = true;
+        file.addEventListener("change", () => { submit.disabled = !file.files?.length; });
+        submit.addEventListener("click", async () => {
+            const uploaded = file.files?.[0];
+            if (!uploaded) return;
+            submit.disabled = true;
+            try {
+                const body = new FormData();
+                body.append("archivo", uploaded);
+                const response = await fetch(`${taskUrl}${task.id}/entregas/`, {
+                    method: "POST",
+                    headers: { Accept: "application/json", "X-CSRFToken": csrf },
+                    body,
+                });
+                let result = {};
+                try { result = await response.json(); } catch (_) { /* error genérico */ }
+                if (!response.ok) throw new Error(result.error || "No se pudo entregar el archivo.");
+                await loadProjects();
+                notify(isRetry ? "Corrección entregada. Se conservó el intento anterior." : "Entrega grupal registrada.");
+            } catch (error) {
+                notify(error.message, true);
+                submit.disabled = !file.files?.length;
+            }
+        });
+        wrapper.append(file, submit);
+        return wrapper;
     }
 
     function renderRecentDocuments() {
@@ -592,6 +668,37 @@
         return { label: "Baja", key: "baja" };
     }
 
+    function taskDeliveryLabel(task) {
+        const deliveries = task.entregas || [];
+        const validDeliveries = deliveries.filter((delivery) => delivery.estado !== "rechazada");
+        if (validDeliveries.length) {
+            const latest = validDeliveries.reduce((current, item) => !current || item.fecha_entrega > current.fecha_entrega ? item : current, null);
+            const parts = new Intl.DateTimeFormat("en-US", { timeZone: document.body.dataset.timezone || "UTC", calendar: "gregory", numberingSystem: "latn", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(latest.fecha_entrega));
+            const date = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+            const deliveredOn = `${date.year}-${date.month}-${date.day}`;
+            if (!task.fecha_vencimiento) return "Entregado";
+            return deliveredOn <= task.fecha_vencimiento ? "Entregado a tiempo" : "Entregado tarde";
+        }
+        if (deliveries.some((delivery) => delivery.estado === "rechazada")) {
+            const due = calculatedPriority(task.fecha_vencimiento);
+            return due.key === "vencida" ? "Vencida · Requiere corrección" : "Requiere corrección";
+        }
+        if (task.estado === "completada") return "Finalizado";
+        return calculatedPriority(task.fecha_vencimiento).label;
+    }
+
+    function deliveryTimingLabel(delivery, dueDate) {
+        if (!dueDate) return "Sin fecha límite";
+        const parts = new Intl.DateTimeFormat("en-US", { timeZone: document.body.dataset.timezone || "UTC", calendar: "gregory", numberingSystem: "latn", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date(delivery.fecha_entrega));
+        const date = Object.fromEntries(parts.map(({ type, value }) => [type, value]));
+        const deliveredOn = `${date.year}-${date.month}-${date.day}`;
+        return deliveredOn <= dueDate ? "Entregada a tiempo" : "Entregada tarde";
+    }
+
+    function taskIsOutstanding(task) {
+        return task.estado !== "completada" && !(task.entregas || []).some((delivery) => delivery.estado !== "rechazada");
+    }
+
     function currentEduflowDate() {
         const timeZone = document.body.dataset.timezone || "UTC";
         const parts = new Intl.DateTimeFormat("en-US", {
@@ -668,7 +775,53 @@
         themeBtn.textContent = document.body.classList.contains("dark") ? "☀️" : "🌙";
     }
     themeBtn?.addEventListener("click", () => applyStudentTheme(!document.body.classList.contains("dark")));
-    $("#profileBtn")?.addEventListener("click", () => $("#profileModal")?.showModal());
+    async function loadUserProfile() {
+        try {
+            const result = await api("/usuarios/api/perfil/");
+            const profile = result.perfil;
+            $("#profileFirstName").value = profile.nombres || "";
+            $("#profileLastName").value = profile.apellidos || "";
+            $("#profileEmail").value = profile.correo || "";
+            $("#profileDni").value = profile.dni || "";
+            $("#profileRole").value = profile.rol === "profesor" ? "Profesor" : "Alumno";
+            $("#profileSpecialtyText").value = profile.especialidad || "Sin registrar";
+            $("#profileSpecialtySetup").hidden = Boolean(profile.especialidad);
+            $("#profileSpecialtyMessage").textContent = "";
+            $("#saveProfileSpecialty").disabled = Boolean(profile.especialidad);
+        } catch (error) { notify(error.message, true); }
+    }
+    $("#profileBtn")?.addEventListener("click", () => { $("#profileModal")?.showModal(); loadUserProfile(); });
+    $$('[data-close-profile]').forEach((button) => button.addEventListener("click", () => $("#profileModal")?.close()));
+    $("#saveProfileSpecialty")?.addEventListener("click", async () => {
+        const message = $("#profileSpecialtyMessage");
+        try {
+            const result = await api("/usuarios/api/perfil/", "PATCH", { especialidad: $("#profileSpecialtySelect").value });
+            $("#profileSpecialtyText").value = result.perfil.especialidad;
+            $("#profileSpecialtySetup").hidden = true;
+            notify("Especialidad registrada.");
+        } catch (error) { message.textContent = error.message; }
+    });
+    $$('[data-toggle-password]').forEach((button) => button.addEventListener("click", () => {
+        const field = button.parentElement.querySelector("input");
+        field.type = field.type === "password" ? "text" : "password";
+        button.setAttribute("aria-label", field.type === "password" ? "Mostrar contraseña" : "Ocultar contraseña");
+    }));
+    $("#profilePasswordForm")?.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const form = event.currentTarget;
+        const message = $("#profilePasswordMessage");
+        const current = form.elements.current.value;
+        const next = form.elements.new.value;
+        const confirmation = form.elements.confirmation.value;
+        message.textContent = "";
+        if (next !== confirmation) { message.textContent = "Las contraseñas nuevas no coinciden."; return; }
+        const submit = form.querySelector('[type="submit"]'); submit.disabled = true;
+        try {
+            const result = await api("/usuarios/api/cambiar-contrasena/", "POST", { contrasena_actual: current, nueva_contrasena: next, confirmacion: confirmation });
+            form.reset(); message.textContent = result.mensaje; notify(result.mensaje);
+        } catch (error) { message.textContent = error.message; }
+        finally { submit.disabled = false; }
+    });
 
     const taskModal = $("#taskModal");
     const projectModal = $("#projectModal");
@@ -681,7 +834,7 @@
         projectModal?.classList.remove("show");
     }
     function setTaskModalBusy(busy) {
-        ["#taskInput", "#taskDescription", "#taskDueDate", "#taskStateInput", "#saveTask", "#deleteTaskBtn", "#closeModal"]
+        ["#taskInput", "#taskDescription", "#taskDueDate", "#taskStateInput", "#saveTask", "#deleteTaskBtn", "#closeModal", "#closeTaskModalTop"]
             .forEach((selector) => { const control = $(selector); if (control) control.disabled = busy; });
     }
     function setProjectModalBusy(busy) {
@@ -706,7 +859,7 @@
                 card.appendChild(make("strong", "", task.titulo));
                 if (task.descripcion) card.appendChild(make("p", "", task.descripcion));
                 const priority = calculatedPriority(task.fecha_vencimiento);
-                card.appendChild(make("span", `card-date priority ${priority.key}`, `${dateLabel(task.fecha_vencimiento)} · Prioridad ${priority.label}`));
+                card.appendChild(make("span", `card-date priority ${priority.key}`, `${dateLabel(task.fecha_vencimiento)} · ${task.estado === "completada" || task.entregas?.length ? taskDeliveryLabel(task) : `Prioridad ${priority.label}`}`));
                 const actions = make("div", "task-card-actions");
                 const stateSelect = document.createElement("select");
                 stateSelect.setAttribute("aria-label", `Estado de ${task.titulo}`);
@@ -730,7 +883,7 @@
             });
             board.appendChild(column);
         });
-        const pendingTasks = allPersonalTasks.filter((task) => task.estado !== "completada");
+        const pendingTasks = allPersonalTasks.filter(taskIsOutstanding);
         const pending = pendingTasks.length;
         const overdue = pendingTasks.filter((task) => calculatedPriority(task.fecha_vencimiento).key === "vencida").length;
         const upcoming = pendingTasks.filter((task) => ["alta", "media"].includes(calculatedPriority(task.fecha_vencimiento).key)).length;
@@ -744,7 +897,7 @@
         if (!list) return;
         list.replaceChildren();
         const upcoming = [...allPersonalTasks]
-            .filter((task) => task.estado !== "completada")
+            .filter(taskIsOutstanding)
             .sort((a, b) => (a.fecha_vencimiento || "9999").localeCompare(b.fecha_vencimiento || "9999"))
             .slice(0, 3);
         if (!upcoming.length) {
@@ -792,6 +945,11 @@
             const result = await api(taskUrl);
             if (requestId !== taskListRequest) return;
             allPersonalTasks = result.tareas;
+            await Promise.all(allPersonalTasks.map(async (task) => {
+                try { task.entregas = (await api(`${taskUrl}${task.id}/entregas/`)).entregas || []; }
+                catch (_) { task.entregas = []; }
+            }));
+            if (requestId !== taskListRequest) return;
             applyTaskFilters();
         } catch (error) { if (requestId === taskListRequest) notify(error.message, true); }
     }
@@ -872,7 +1030,7 @@
             addTask.type = "button";
             addTask.addEventListener("click", () => openProjectTaskBoard(project));
             actions.appendChild(addTask);
-            const documents = make("button", "secondary-button", "Documentos");
+            const documents = make("button", "secondary-button", "Documento");
             documents.type = "button";
             documents.addEventListener("click", () => openProjectResources(project));
             actions.appendChild(documents);
@@ -884,23 +1042,26 @@
             }
             card.appendChild(actions);
 
-            const taskList = make("div", "project-task-list");
-            taskList.appendChild(make("h4", "", "Tareas del equipo"));
+            const taskList = make("details", "project-task-list");
+            taskList.addEventListener("toggle", () => card.classList.toggle("expanded", taskList.open));
+            taskList.appendChild(make("summary", "", "Tareas y entregas del proyecto"));
             if (!project.tareas.length) taskList.appendChild(make("p", "empty-state", "Todavía no hay tareas."));
             project.tareas.forEach((task) => {
                 const row = make("div", "project-task-row");
                 const details = make("div");
                 details.appendChild(make("strong", "", task.titulo));
                 const priority = calculatedPriority(task.fecha_vencimiento);
-                details.appendChild(make("small", "", `${states.find(([value]) => value === task.estado)?.[1] || task.estado} · ${priority.label} · ${dateLabel(task.fecha_vencimiento)}`));
+                details.appendChild(make("small", "", `${states.find(([value]) => value === task.estado)?.[1] || task.estado} · ${task.estado === "completada" || task.entregas?.length ? taskDeliveryLabel(task) : priority.label} · ${dateLabel(task.fecha_vencimiento)}`));
                 row.appendChild(details);
 
                 const deliveryPanel = make("div", "group-delivery-panel");
                 deliveryPanel.appendChild(make("strong", "", "Entrega grupal"));
                 if (task.entregas?.length) {
-                    task.entregas.forEach((delivery) => {
-                        const info = make("p", "", `Entrega #${delivery.id} · ${delivery.alumno} · ${dateLabel(delivery.fecha_entrega.slice(0, 10))} · ${delivery.estado}`);
+                    const deliveryHistory = [...task.entregas].sort((a, b) => a.fecha_entrega.localeCompare(b.fecha_entrega) || a.id - b.id);
+                    deliveryHistory.forEach((delivery) => {
+                        const info = make("p", "", `Entrega #${delivery.id} · ${delivery.alumno} · ${dateLabel(delivery.fecha_entrega.slice(0, 10))} · ${delivery.estado} · ${deliveryTimingLabel(delivery, task.fecha_vencimiento)}`);
                         deliveryPanel.appendChild(info);
+                        if (delivery.devolucion) deliveryPanel.appendChild(make("p", "delivery-return-note", `Motivo de devolución: ${delivery.devolucion}`));
                         const download = make("a", "text-button", `Descargar ${delivery.nombre}`);
                         download.href = delivery.descarga;
                         deliveryPanel.appendChild(download);
@@ -913,44 +1074,14 @@
                         }
                     });
                     deliveryPanel.appendChild(make("small", "", "La entrega queda disponible para todo el grupo."));
+                    const latest = deliveryHistory[deliveryHistory.length - 1];
+                    if (latest.estado === "rechazada") {
+                        deliveryPanel.appendChild(make("p", "", "El docente pidió una corrección. Puedes volver a entregar el archivo."));
+                        deliveryPanel.appendChild(makeDeliveryUpload(task, true));
+                    }
                 } else {
                     deliveryPanel.appendChild(make("p", "", "El grupo todavía no realizó la entrega."));
-                    const file = document.createElement("input");
-                    file.type = "file";
-                    file.accept = ".pdf,.doc,.docx,.xls,.xlsx,.ppt,.pptx,.png,.jpg,.jpeg";
-                    file.setAttribute("aria-label", `Archivo para entregar: ${task.titulo}`);
-                    const submit = make("button", "text-button", "Entregar archivo por el grupo");
-                    submit.type = "button";
-                    submit.disabled = true;
-                    file.addEventListener("change", () => { submit.disabled = !file.files?.length; });
-                    submit.addEventListener("click", async () => {
-                        const uploaded = file.files?.[0];
-                        if (!uploaded) return;
-                        submit.disabled = true;
-                        try {
-                            const body = new FormData();
-                            body.append("archivo", uploaded);
-                            const response = await fetch(`${taskUrl}${task.id}/entregas/`, {
-                                method: "POST",
-                                headers: { Accept: "application/json", "X-CSRFToken": csrf },
-                                body,
-                            });
-                            let result = {};
-                            try { result = await response.json(); } catch (_) { /* error genérico */ }
-                            if (response.status === 409) {
-                                await loadProjects();
-                                notify(result.error || "El grupo ya realizó la entrega.", true);
-                                return;
-                            }
-                            if (!response.ok) throw new Error(result.error || "No se pudo entregar el archivo.");
-                            await loadProjects();
-                            notify("Entrega grupal registrada.");
-                        } catch (error) {
-                            notify(error.message, true);
-                            submit.disabled = !file.files?.length;
-                        }
-                    });
-                    deliveryPanel.append(file, submit);
+                    deliveryPanel.appendChild(makeDeliveryUpload(task, false));
                 }
                 if (task.evaluacion_grupal) {
                     const evaluation = task.evaluacion_grupal;
@@ -1050,6 +1181,8 @@
                 const card = make("article", "document-card");
                 card.appendChild(make("strong", "", item.titulo));
                 card.appendChild(make("span", "", "Guardado " + dateLabel(item.fecha_actualizacion.slice(0, 10))));
+                card.appendChild(make("span", "document-review-state", `Revisión: ${documentReviewLabel(item.estado_revision)}`));
+                if (item.retroalimentacion) card.appendChild(make("p", "", `Devolución docente: ${item.retroalimentacion}`));
                 const open = make("button", "text-button", item.puede_editar ? "Abrir y editar" : "Ver");
                 open.type = "button";
                 open.addEventListener("click", () => openDocument(item, project.id));
@@ -1081,7 +1214,8 @@
                 card.appendChild(make("strong", "", task.titulo));
                 if (task.descripcion) card.appendChild(make("p", "", task.descripcion));
                 const priority = calculatedPriority(task.fecha_vencimiento);
-                card.appendChild(make("span", "priority " + priority.key, priority.label + " · " + dateLabel(task.fecha_vencimiento)));
+                const taskStatus = task.estado === "completada" || task.entregas?.length ? taskDeliveryLabel(task) : priority.label;
+                card.appendChild(make("span", "priority " + priority.key, taskStatus + " · " + dateLabel(task.fecha_vencimiento)));
                 const stateSelect = document.createElement("select");
                 stateSelect.setAttribute("aria-label", "Estado de " + task.titulo);
                 states.forEach(([value, text]) => stateSelect.add(new Option(text, value, false, task.estado === value)));
@@ -1169,6 +1303,7 @@
     $("#newProjectBtn")?.addEventListener("click", () => openProject());
     $("#saveTask")?.addEventListener("click", saveTask);
     $("#closeModal")?.addEventListener("click", closeTaskModal);
+    $("#closeTaskModalTop")?.addEventListener("click", closeTaskModal);
     $("#deleteTaskBtn")?.addEventListener("click", () => editingTask && deleteTask(editingTask).then(closeTaskModal));
     $("#saveProjectBtn")?.addEventListener("click", saveProject);
     $("#deleteProjectBtn")?.addEventListener("click", deleteProject);
@@ -1283,7 +1418,7 @@
     documentModal?.addEventListener("click", (event) => { if (event.target === documentModal) closeDocument(); });
 
     loadTasks();
-    loadProjects().then(() => {
+    Promise.all([loadProjects(), loadFolders()]).then(() => {
         const fileProject = $("#fileProjectFilter");
         const docProject = $("#documentProjectInput");
         projects.forEach((project) => {
@@ -1291,7 +1426,6 @@
             docProject?.add(new Option(project.nombre, project.id));
         });
         loadFiles();
-    });
-    loadFolders().catch((error) => notify(error.message, true));
+    }).catch((error) => notify(error.message, true));
     loadDocuments();
 })();
