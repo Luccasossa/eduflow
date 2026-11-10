@@ -363,6 +363,8 @@ nav {
     width: calc(100% - var(--sidebar-width));
     min-height: 100vh;
     padding: 30px 40px 48px;
+    display: flex;
+    flex-direction: column;
 }
 
 .header {
@@ -1151,6 +1153,7 @@ nav {
         .password-field { display:flex; align-items:stretch; gap:6px; } .password-field input { min-width:0; flex:1; } .password-field button { border:1px solid var(--border); border-radius:7px; padding:0 10px; cursor:pointer; }
         .profile-password-unavailable label { display:grid; gap:5px; font-size:13px; color:var(--text-muted); }
         .eduflow-footer { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:8px 24px; margin-top:38px; padding:24px clamp(16px,3vw,36px); border-radius:12px; background:#102a56; color:#fff; font-size:14px; line-height:1.55; }
+        .main > .eduflow-footer { margin-top:auto; }
         .eduflow-footer p { margin:0; } .eduflow-footer p:first-child { grid-column:1 / -1; font-weight:700; }
         .logout-button { background:#f97316 !important; color:#fff !important; font-weight:700; }
         .teacher-document-editor { width:min(1100px, calc(100vw - 32px)); max-height:90vh; overflow:auto; }
@@ -2275,16 +2278,16 @@ nav {
             if (entry.calificacion) item.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
             if (entry.puede_editar) {
                 var actions = el('div', 'modal-actions');
-                var edit = el('button', 'text-button', 'Editar devoluciÃ³n');
+                var edit = el('button', 'text-button', 'Editar devolución');
                 edit.type = 'button';
                 edit.addEventListener('click', function () { openProjectFeedbackEditor(entry); });
                 var remove = el('button', 'danger-button', 'Eliminar');
                 remove.type = 'button';
                 remove.addEventListener('click', function () {
-                    if (!window.confirm('Â¿Eliminar esta devoluciÃ³n?')) return;
+                    if (!window.confirm('¿Eliminar esta devolución?')) return;
                     requestJson('/proyectos/api/devoluciones/' + entry.id + '/', { method: 'DELETE', headers: { 'X-CSRFToken': csrfToken() } })
-                        .then(function () { return refreshEvaluationProject('DevoluciÃ³n eliminada.'); })
-                        .catch(function (error) { toast(error.message || 'No se pudo eliminar la devoluciÃ³n.'); });
+                        .then(function () { return refreshEvaluationProject('Devolución eliminada.'); })
+                        .catch(function (error) { toast(error.message || 'No se pudo eliminar la devolución.'); });
                 });
                 actions.append(edit, remove);
                 item.appendChild(actions);
@@ -2404,7 +2407,7 @@ nav {
                 var dateText = col.key === 'done' ? '✓ Finalizado' : (t.date ? '📅 ' + formatDate(t.date) : 'Sin fecha');
                 var date = el('span', 'card-date' + (col.key !== 'done' && isOverdue(t.date) ? ' overdue' : ''), dateText);
                 footer.appendChild(date);
-                var review = el('button', 'text-button', 'Ver historial y dejar devoluci?n');
+                var review = el('button', 'text-button', 'Ver historial y dejar devolución');
                 review.type = 'button';
                 review.dataset.gradeTaskId = t.id;
                 footer.appendChild(review);

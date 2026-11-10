@@ -100,6 +100,8 @@ nav {
     width: calc(100% - 250px);
     min-height: 100vh;
     padding: 30px 40px;
+    display: flex;
+    flex-direction: column;
 }
 
 
@@ -1007,9 +1009,9 @@ body.dark .file-card span {
         align-items: flex-start;
     }
 
-    .profile div:last-child {
-        display: none;
-    }
+    .profile { min-width: 0; }
+    .profile > div:last-child { min-width: 0; }
+    .profile strong { display: block; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     .stats,
     .projects,
@@ -1631,6 +1633,7 @@ body.dark .project-task-board-modal .kanban-card select {
 
 /* Shared responsive footer and emphasized logout action */
 .eduflow-footer { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px 24px; margin-top: 38px; padding: 24px clamp(16px, 3vw, 36px); border-radius: 12px; background: #102a56; color: #fff; font-size: 14px; line-height: 1.55; }
+.main > .eduflow-footer { margin-top: auto; }
 .eduflow-footer p { margin: 0; }
 .eduflow-footer p:first-child { grid-column: 1 / -1; font-weight: 700; }
 .logout-button { justify-content: center; background: #f97316 !important; color: #fff !important; font-weight: 700; }
@@ -1640,6 +1643,19 @@ body.dark .project-task-board-modal .kanban-card select {
 .profile-password-unavailable h3 { font-size:1rem; }
 .storage { display:flex; align-items:center; justify-content:space-between; gap:12px; margin:0 0 16px; padding:14px 16px; border:1px solid var(--border); border-radius:10px; background:var(--surface); color:var(--text); }
 .storage span { color:var(--text-muted); }
+#archivos .section-header { gap: 16px; }
+#archivos .section-header p { line-height: 1.5; }
+#archivos .file-toolbar { margin: 20px 0; gap: 14px; }
+#archivos .file-grid { margin-bottom: 18px; }
+#archivos > .muted { margin-top: 18px; line-height: 1.55; }
+.document-writing-area[contenteditable="true"] { display: block; min-height: min(58vh, 620px); cursor: text; }
+@media (max-width: 600px) {
+    #archivos .section-header { align-items: flex-start; flex-direction: column; }
+    #archivos .storage { align-items: flex-start; flex-direction: column; }
+    #archivos .file-toolbar { align-items: stretch; flex-direction: column; }
+    #archivos .file-toolbar label, #archivos .file-toolbar select { width: 100%; }
+    #archivos .file-toolbar button { align-self: flex-start; }
+}
 .file-card select { max-width:100%; padding:6px; border:1px solid var(--border); border-radius:6px; background:var(--surface); color:var(--text); }
 .danger-text { color:#b91c1c; }
 .profile-password-unavailable label { display:grid; gap:5px; font-size:13px; color:var(--text-muted); }
