@@ -365,6 +365,52 @@ class TablerosTests(TestCase):
         self.assertEqual(self.json_post(url, {"calificacion": 10}).status_code, 403)
         self.assertEqual(proyecto.devoluciones.count(), 2)
 
+    def test_historial_versionado_pertenece_al_creador_original_y_alumno_ve_ambos(self):
+        from proyectos.models import DevolucionDocente
+
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor, self.otro_profesor)
+        url = reverse("api_devoluciones", args=[proyecto.pk])
+
+        self.client.force_login(self.profesor)
+        created = self.json_post(url, {"comentario": "De Lucca", "calificacion": "8"})
+        self.assertEqual(created.status_code, 201, created.content)
+        original_id = created.json()["devolucion"]["id"]
+        edited = self.client.patch(
+            reverse("api_devolucion", args=[original_id]),
+            data=json.dumps({"comentario": "Versión corregida", "calificacion": "9"}),
+            content_type="application/json",
+        )
+        self.assertEqual(edited.status_code, 201, edited.content)
+        replacement_id = edited.json()["devolucion"]["id"]
+        self.assertEqual(DevolucionDocente.objects.get(pk=replacement_id).autor, self.profesor)
+
+        # Simulate an authorized administrative cancellation by the other teacher;
+        # this action must not transfer ownership of the historical row.
+        original = DevolucionDocente.objects.get(pk=original_id)
+        original.anulada_en = timezone.now()
+        original.anulada_por = self.otro_profesor
+        original.save(update_fields=("anulada_en", "anulada_por"))
+
+        self.client.force_login(self.otro_profesor)
+        other_created = self.json_post(url, {"comentario": "De Cristian", "calificacion": "7"})
+        self.assertEqual(other_created.status_code, 201, other_created.content)
+        other_id = other_created.json()["devolucion"]["id"]
+        self.assertEqual(
+            {item["id"] for item in self.client.get(url).json()["devoluciones"]},
+            {other_id},
+        )
+
+        self.client.force_login(self.profesor)
+        own_entries = self.client.get(url).json()["devoluciones"]
+        self.assertEqual({item["id"] for item in own_entries}, {original_id, replacement_id})
+        self.assertEqual(next(item for item in own_entries if item["id"] == original_id)["anulada_por"],
+                         self.otro_profesor.get_full_name() or self.otro_profesor.dni)
+
+        self.client.force_login(self.alumno)
+        student_entries = self.client.get(url).json()["devoluciones"]
+        self.assertEqual({item["id"] for item in student_entries}, {original_id, replacement_id, other_id})
+
     def test_evaluaciones_de_profesores_compartidos_se_aislan_en_ambos_sentidos(self):
         from proyectos.models import DevolucionDocente
 

@@ -357,7 +357,9 @@ def api_devolucion(request, pk):
             raise ValueError
         replacement = DevolucionDocente(
             proyecto=entry.proyecto, tarea=entry.tarea, documento=entry.documento,
-            autor=request.user, tipo=entry.tipo, alumno=entry.alumno,
+            # A version keeps the original creator as its owner. The user who
+            # performs the edit is recorded on the previous row's anulada_por.
+            autor=entry.autor, tipo=entry.tipo, alumno=entry.alumno,
             calificacion=grade, comentario=comment.strip(), reemplaza=entry,
         )
         replacement.full_clean()
@@ -372,7 +374,7 @@ def api_devolucion(request, pk):
         if replacement.tarea_id:
             replacement.tarea.calificacion = replacement.calificacion
             replacement.tarea.retroalimentacion = replacement.comentario
-            replacement.tarea.evaluado_por = request.user
+            replacement.tarea.evaluado_por = replacement.autor
             replacement.tarea.save(update_fields=("calificacion", "retroalimentacion", "evaluado_por"))
     return JsonResponse({"devolucion": _serializar_devolucion(replacement, request.user)}, status=201)
 
