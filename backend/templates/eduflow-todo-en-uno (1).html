@@ -1337,14 +1337,13 @@ nav {
 
         <!-- ARCHIVOS DE CÁTEDRA -->
         <section id="revision-tareas" class="section" hidden>
-            <div class="section-header"><div><h2>Tareas de alumnos</h2><p>Tareas existentes en los proyectos de tus alumnos por corregir.</p></div></div>
+            <div class="section-header"><div><p>Tareas existentes en los proyectos de tus alumnos por corregir.</p></div></div>
             <div id="reviewTaskQueue" class="review-queue" aria-live="polite"><p class="muted">Cargando tareas para revisar…</p></div>
         </section>
 
         <section id="revisiones" class="section" hidden>
             <div class="section-header">
                 <div>
-                    <h2>Revisión entregas</h2>
                     <p>Accedé a las entregas y documentos asociados a los proyectos asignados.</p>
                 </div>
             </div>
@@ -1354,7 +1353,6 @@ nav {
         <section id="archivos-catedra" class="section" hidden>
             <div class="section-header">
                 <div>
-                    <h2>Archivos de cursada</h2>
                     <p>Subí y gestioná tus materiales didácticos, guías y documentos teóricos.</p>
                 </div>
                 <div class="teacher-file-actions"><button type="button" class="primary-button" id="uploadBtn">⬆ Subir archivos</button><button type="button" class="secondary-button" id="createTeacherFolderBtn">Crear carpeta</button></div>
@@ -1377,7 +1375,6 @@ nav {
             <div id="projectListView">
                 <div class="section-header">
                     <div>
-                        <h2>Proyectos de Alumnos</h2>
                         <p>Seleccioná la carpeta de un proyecto para revisar su tablero y entregas.</p>
                     </div>
                 </div>
@@ -1419,17 +1416,10 @@ nav {
                 </div>
             </div>
         </section>
-
-
-        <section id="tareas-alumnos" class="section" hidden>
-            <div class="section-header"><div><h2>Tareas de alumnos</h2><p>Tareas existentes en los proyectos de tus alumnos.</p></div></div>
-            <div id="studentTaskAssignmentList" class="review-queue" aria-live="polite"><p class="muted">Cargando tareas...</p></div>
-        </section>
         <!-- DOCUMENTOS GENERALES -->
         <section id="documentos" class="section" hidden>
             <div class="section-header">
                 <div>
-                    <h2>Documentos</h2>
                     <p>Documentos institucionales y plantillas generales.</p>
                 </div>
                 <button type="button" class="primary-button" id="newTeacherDocument">+ Nuevo documento</button>
@@ -1746,7 +1736,6 @@ nav {
                     if (requestId !== projectLoadRequest) return;
                     teacherDocuments = docs;
                     projects = loadedProjects;
-                    loadStudentTaskAssignments();
                 var projectSelect = $('fileProjectSelect');
                 if (projectSelect) {
                     projectSelect.replaceChildren(new Option('Archivo personal de cátedra', ''));
@@ -1901,6 +1890,18 @@ nav {
             if (active) n.setAttribute('aria-current', 'page'); else n.removeAttribute('aria-current');
         });
         $('page-title').textContent = target.dataset.title || 'Gestión de Cátedra';
+        var pageDescription = $('page-title').parentElement.querySelector('p');
+        var section = document.getElementById(id);
+        var sectionDescription = section.querySelector('.section-header p');
+        pageDescription.textContent = id === 'revision-tareas'
+            ? 'Supervisión y corrección de las tareas comunes creadas por tus alumnos.'
+            : (sectionDescription ? sectionDescription.textContent.trim() : 'Supervisión de archivos, proyectos y retroalimentación pedagógica.');
+        pageDescription.hidden = !pageDescription.textContent;
+        if (sectionDescription) {
+            sectionDescription.hidden = true;
+            var sectionHeader = sectionDescription.closest('.section-header');
+            if (sectionHeader && !sectionHeader.querySelector('button, input, select')) sectionHeader.hidden = true;
+        }
     }
 
     function initNavigation() {
@@ -1972,43 +1973,6 @@ nav {
                 });
             }).catch(function (err) { box.replaceChildren(el('p', 'form-error', err.message)); });
     }
-
-    function loadStudentTaskAssignments() {
-        var list = $('studentTaskAssignmentList');
-        if (!list) return;
-        list.replaceChildren();
-        var rows = [];
-        projects.forEach(function (project) {
-            project.tasks.forEach(function (task) { rows.push({project: project, task: task}); });
-        });
-        if (!rows.length) {
-            list.appendChild(el('p', 'muted', 'Todavía no hay tareas en los proyectos supervisados.'));
-            return;
-        }
-        rows.forEach(function (row) {
-            var project = row.project, task = row.task;
-            var card = el('article', 'teacher-summary-card');
-            card.appendChild(el('h3', '', task.title));
-            card.appendChild(el('p', '', 'Alumno: ' + (task.author || project.members.join(', ')) + ' · Proyecto: ' + project.name));
-            card.appendChild(el('p', '', task.desc || 'Sin descripción.'));
-            card.appendChild(el('p', '', 'Estado: ' + task.column + ' · Entrega: ' + (task.date || 'Sin fecha')));
-            (task.attachments || []).forEach(function (file) {
-                var link = el('a', 'text-button', 'Archivo: ' + file.nombre);
-                link.href = file.abrir; link.target = '_blank'; link.rel = 'noopener noreferrer'; card.appendChild(link);
-            });
-            var view = el('button', 'text-button', 'Ver tarea'); view.type = 'button';
-            view.addEventListener('click', function () { showTeacherTaskDetail(task, project); });
-            card.appendChild(view);
-            list.appendChild(card);
-        });
-    }
-
-    function initStudentTaskAssignments() {
-        var nav = document.querySelector('.nav-item[data-section="tareas-alumnos"]');
-        if (nav) nav.addEventListener('click', loadStudentTaskAssignments);
-        loadStudentTaskAssignments();
-    }
-
     /* ---------- Inicio ---------- */
     function renderWelcome() {
         var n = projects.filter(function (project) { return project.progress < 100; }).length;
@@ -2067,17 +2031,14 @@ nav {
             return doc.proyecto_id && (doc.estado_revision === 'pendiente' || doc.estado_revision === 'en_revision');
         });
         var list = $('pendingReviewList');
-        var taskQueue = $('reviewTaskQueue');
         var deliveryQueue = $('reviewDeliveryQueue');
         list.replaceChildren();
-        taskQueue.replaceChildren();
         deliveryQueue.replaceChildren();
         var pendingCount = pendingDeliveries.length + pendingDocuments.length;
         $('pendingReviewCount').textContent = String(pendingCount);
         $('pendingReviewLabel').textContent = pendingCount === 1 ? ' revisión pendiente' : ' revisiones pendientes';
         if (!pendingDocuments.length && !pendingDeliveries.length) {
             list.appendChild(el('p', 'muted', 'No tenés revisiones pendientes.'));
-            taskQueue.appendChild(el('p', 'muted', 'No tenés tareas pendientes de revisión.'));
             deliveryQueue.appendChild(el('p', 'muted', 'No tenés entregas ni documentos pendientes de revisión.'));
         }
         pendingDeliveries.forEach(function (entry) {
@@ -2088,11 +2049,6 @@ nav {
             var summaryButton = el('button', 'text-button pending-review-item', label);
             summaryButton.type = 'button'; summaryButton.dataset.reviewProjectId = project.id; summaryButton.dataset.reviewTaskId = task.id;
             list.appendChild(summaryButton);
-            var taskButton = el('button', 'text-button review-queue-item', label);
-            taskButton.type = 'button';
-            taskButton.dataset.reviewProjectId = project.id;
-            taskButton.dataset.reviewTaskId = task.id;
-            taskQueue.appendChild(taskButton);
             makeDeliveryReviewCard(deliveryQueue, project, task, delivery);
         });
         pendingDocuments.forEach(function (doc) {
@@ -2120,6 +2076,71 @@ nav {
     }
 
     /* ---------- Archivos de cátedra ---------- */
+    function loadCommonTaskReviews() {
+        var list = $('reviewTaskQueue');
+        if (!list) return;
+        list.replaceChildren(el('p', 'muted', 'Cargando tareas comunes...'));
+        requestJson('/tareas/api/revision-comunes/').then(function (result) {
+            list.replaceChildren();
+            if (!result.tareas.length) {
+                list.appendChild(el('p', 'muted', 'No tenes tareas pendientes de revision.'));
+                return;
+            }
+            result.tareas.forEach(function (task) {
+                var stateLabel = ({ pendiente: 'Pendiente', en_progreso: 'En progreso', completada: 'Completada' })[task.estado] || task.estado;
+                var card = el('article', 'review-queue-item');
+                card.appendChild(el('strong', null, task.titulo));
+                card.appendChild(el('p', null, task.descripcion || 'Sin descripcion.'));
+                card.appendChild(el('span', 'muted', 'Alumno: ' + task.alumno + ' · Creada: ' + new Date(task.creada).toLocaleString('es-AR') + ' · Estado: ' + stateLabel));
+                if (task.calificacion !== '') card.appendChild(el('p', null, 'Calificacion: ' + task.calificacion + '/' + document.body.dataset.gradeMax));
+                if (task.retroalimentacion) card.appendChild(el('p', null, 'Comentario: ' + task.retroalimentacion));
+                (task.archivos_adjuntos || []).forEach(function (file) {
+                    var link = el('a', 'text-button', 'Archivo: ' + file.nombre);
+                    link.href = file.abrir; link.target = '_blank'; link.rel = 'noopener noreferrer'; card.appendChild(link);
+                });
+                var open = el('button', 'secondary-button', 'Abrir y revisar');
+                open.type = 'button'; open.addEventListener('click', function () { openCommonTaskReview(task); });
+                card.appendChild(open); list.appendChild(card);
+            });
+        }).catch(function (error) {
+            list.replaceChildren(el('p', 'form-error', 'No se pudieron cargar las tareas: ' + error.message));
+        });
+    }
+
+    function openCommonTaskReview(task) {
+        var modal = $('teacherTaskDetailModal'), box = $('teacherTaskDetailContent');
+        var stateLabel = ({ pendiente: 'Pendiente', en_progreso: 'En progreso', completada: 'Completada' })[task.estado] || task.estado;
+        $('teacherTaskDetailTitle').textContent = 'Tarea comun · ' + task.titulo;
+        box.replaceChildren(
+            el('p', null, 'Alumno: ' + task.alumno),
+            el('p', null, 'Creada: ' + new Date(task.creada).toLocaleString('es-AR') + ' · Estado: ' + stateLabel),
+            el('h3', null, 'Descripcion'), el('p', null, task.descripcion || 'Sin descripcion.'),
+            el('h3', null, 'Archivos adjuntos')
+        );
+        if (!(task.archivos_adjuntos || []).length) box.appendChild(el('p', 'empty-state', 'No hay archivos adjuntos.'));
+        (task.archivos_adjuntos || []).forEach(function (file) {
+            var link = el('a', 'text-button', file.nombre);
+            link.href = file.abrir; link.target = '_blank'; link.rel = 'noopener noreferrer'; box.appendChild(link);
+        });
+        var form = el('form', 'teacher-evaluation-form');
+        var gradeLabel = el('label', null, 'Calificacion (opcional)'), grade = document.createElement('input');
+        grade.type = 'number'; grade.min = '0'; grade.max = document.body.dataset.gradeMax; grade.step = '0.01'; grade.value = task.calificacion || ''; gradeLabel.appendChild(grade);
+        var commentLabel = el('label', null, 'Comentario'), comment = document.createElement('textarea');
+        comment.maxLength = 20000; comment.rows = 4; comment.value = task.retroalimentacion || ''; commentLabel.appendChild(comment);
+        var error = el('p', 'form-error', ''), save = el('button', 'primary-button', 'Guardar devolucion'); save.type = 'submit';
+        form.append(gradeLabel, commentLabel, error, save);
+        form.addEventListener('submit', function (event) {
+            event.preventDefault(); error.textContent = ''; save.disabled = true;
+            requestJson('/tareas/api/' + task.id + '/evaluacion/', {
+                method: 'PATCH', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrfToken() },
+                body: JSON.stringify({ calificacion: grade.value || null, retroalimentacion: comment.value.trim() })
+            }).then(function () {
+                modal.close(); toast('Devolucion guardada.'); loadCommonTaskReviews();
+            }).catch(function (err) { error.textContent = err.message; save.disabled = false; });
+        });
+        box.appendChild(form); modal.showModal();
+    }
+
     function initFiles() {
         $('uploadBtn').addEventListener('click', function () { $('fileInput').click(); });
 
@@ -3135,11 +3156,11 @@ nav {
     /* ---------- Inicio ---------- */
     document.addEventListener('DOMContentLoaded', function () {
         initNavigation();
+        loadCommonTaskReviews();
         initFiles();
         initTeacherDocuments();
         initKanban();
         initProjectEvaluation();
-        initStudentTaskAssignments();
         initFeedback();
         initModals();
         initMisc();

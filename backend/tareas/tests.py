@@ -162,10 +162,84 @@ class TablerosTests(TestCase):
         self.assertTrue(Tarea.objects.filter(pk=tarea_proyecto.pk).exists())
         self.assertTrue(Tarea.objects.filter(pk=asignada.pk).exists())
 
+    def test_revision_docente_solo_incluye_tareas_comunes_de_alumnos_supervisados(self):
+        from archivos.models import Archivo
+
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        common_task = Tarea.objects.create(creador=self.alumno, titulo="Tarea comun", descripcion="Lectura")
+        attached_file = Archivo.objects.create(
+            propietario=self.alumno,
+            archivo=SimpleUploadedFile("lectura.pdf", b"%PDF-1.4 contenido", content_type="application/pdf"),
+            nombre_original="lectura.pdf",
+            tipo="application/pdf",
+        )
+        self.addCleanup(attached_file.archivo.storage.delete, attached_file.archivo.name)
+        common_task.archivos_adjuntos.add(attached_file)
+        project_task = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Tarea del proyecto")
+        unrelated_task = Tarea.objects.create(creador=self.ajeno, titulo="Tarea ajena")
+        self.client.force_login(self.profesor)
+
+        listing = self.client.get(reverse("api_revision_tareas_comunes"))
+        self.assertEqual(listing.status_code, 200)
+        rows = listing.json()["tareas"]
+        self.assertEqual([row["id"] for row in rows], [common_task.pk])
+        self.assertEqual(rows[0]["alumno_id"], self.alumno.pk)
+        self.assertTrue(rows[0]["creada"])
+        self.assertEqual(rows[0]["archivos_adjuntos"][0]["nombre"], "lectura.pdf")
+        downloaded = self.client.get(rows[0]["archivos_adjuntos"][0]["descarga"])
+        self.assertEqual(downloaded.status_code, 200)
+        downloaded.close()
+        self.assertEqual(self.client.get(reverse("api_tarea", args=[common_task.pk])).status_code, 200)
+        self.assertEqual(self.client.get(reverse("api_tarea", args=[project_task.pk])).status_code, 200)
+        self.assertEqual(self.client.get(reverse("api_tarea", args=[unrelated_task.pk])).status_code, 404)
+
+        response = self.client.patch(
+            reverse("api_calificar_tarea", args=[common_task.pk]),
+            data=json.dumps({"calificacion": "9.50", "retroalimentacion": "Buen trabajo."}),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        common_task.refresh_from_db()
+        self.assertEqual(str(common_task.calificacion), "9.50")
+        self.assertEqual(common_task.retroalimentacion, "Buen trabajo.")
+
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.get(reverse("api_revision_tareas_comunes")).status_code, 403)
+
     def test_solo_alumno_puede_eliminar_todas_sus_tareas(self):
         self.client.force_login(self.profesor)
         response = self.client.delete(reverse("api_eliminar_todas_tareas"))
         self.assertEqual(response.status_code, 403)
+
+    def test_revision_docente_lista_solo_tareas_comunes_de_sus_alumnos_y_permite_devolucion(self):
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        common_task = Tarea.objects.create(creador=self.alumno, titulo="Tarea comun", descripcion="Lectura")
+        project_task = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Tarea del proyecto")
+        unrelated_task = Tarea.objects.create(creador=self.ajeno, titulo="Tarea ajena")
+
+        self.client.force_login(self.profesor)
+        listing = self.client.get(reverse("api_revision_tareas_comunes"))
+        self.assertEqual(listing.status_code, 200)
+        self.assertEqual([row["id"] for row in listing.json()["tareas"]], [common_task.pk])
+        row = listing.json()["tareas"][0]
+        self.assertEqual(row["alumno_id"], self.alumno.pk)
+        self.assertEqual(row["titulo"], "Tarea comun")
+        self.assertTrue(row["creada"])
+
+        self.assertEqual(self.client.get(reverse("api_tarea", args=[common_task.pk])).status_code, 200)
+        self.assertEqual(self.client.get(reverse("api_tarea", args=[project_task.pk])).status_code, 200)
+        self.assertEqual(self.client.get(reverse("api_tarea", args=[unrelated_task.pk])).status_code, 404)
+        graded = self.client.patch(
+            reverse("api_calificar_tarea", args=[common_task.pk]),
+            data=json.dumps({"calificacion": "9.50", "retroalimentacion": "Buen trabajo."}),
+            content_type="application/json",
+        )
+        self.assertEqual(graded.status_code, 200, graded.content)
+        common_task.refresh_from_db()
+        self.assertEqual(str(common_task.calificacion), "9.50")
+        self.assertEqual(common_task.retroalimentacion, "Buen trabajo.")
 
     def test_un_alumno_no_puede_consultar_ni_modificar_tarea_ajena(self):
         tarea = Tarea.objects.create(creador=self.alumno, titulo="Privada")

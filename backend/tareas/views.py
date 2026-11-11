@@ -14,7 +14,7 @@ from django.conf import settings
 
 from proyectos.models import Proyecto
 from proyectos.models import DevolucionDocente
-from proyectos.permissions import profesor_autorizado
+from proyectos.permissions import profesor_autorizado, profesor_supervisa_alumno
 from .models import AsignacionTarea, CorreccionEntrega, Entrega, Tarea
 from .prioridad import prioridad_para, sincronizar_prioridades
 
@@ -114,7 +114,14 @@ def _tarea_autorizada(request, pk):
     if tarea.proyecto_id is None:
         if rol == "alumno" and (tarea.creador_id == request.user.id or tarea.asignaciones.filter(alumno=request.user).exists()):
             return tarea
-        if rol == "profesor" and tarea.asignaciones.filter(profesor=request.user).exists():
+        if rol == "profesor" and (
+            tarea.asignaciones.filter(profesor=request.user).exists()
+            or (
+                not tarea.asignaciones.exists()
+                and _rol(tarea.creador) == "alumno"
+                and profesor_supervisa_alumno(request.user, tarea.creador)
+            )
+        ):
             return tarea
     elif (rol == "profesor" and profesor_autorizado(request.user, tarea.proyecto)) or (
         rol == "alumno"
@@ -210,6 +217,35 @@ def api_tareas(request):
         if proyecto:
             proyecto.actualizar_progreso()
     return JsonResponse({"tarea": _serializar(tarea, request.user)}, status=201)
+
+
+@login_required
+@require_http_methods(["GET"])
+def api_revision_tareas_comunes(request):
+    if _rol(request.user) != "profesor":
+        return JsonResponse({"error": "Solo los profesores pueden consultar tareas para revisar."}, status=403)
+
+    from django.db.models import Q
+    tareas = Tarea.objects.filter(
+        proyecto__isnull=True,
+        creador__perfil__rol="alumno",
+        asignaciones__isnull=True,
+    ).select_related("creador").prefetch_related("archivos_adjuntos")
+    if not request.user.is_superuser:
+        tareas = tareas.filter(
+            Q(creador__proyectos__profesores=request.user)
+            | Q(creador__proyectos_creados__profesores=request.user)
+        )
+    rows = []
+    for tarea in tareas.distinct().order_by("-fecha_creacion", "-pk"):
+        row = _serializar(tarea, request.user)
+        row.update({
+            "alumno_id": tarea.creador_id,
+            "alumno": tarea.creador.get_full_name() or tarea.creador.dni,
+            "creada": tarea.fecha_creacion.isoformat(),
+        })
+        rows.append(row)
+    return JsonResponse({"tareas": rows})
 
 
 @login_required
@@ -346,6 +382,44 @@ def api_tarea(request, pk):
 def api_calificar_tarea(request, pk):
     if _rol(request.user) != "profesor":
         return JsonResponse({"error": "Solo los profesores pueden calificar tareas."}, status=403)
+    tarea_autorizada = _tarea_autorizada(request, pk)
+    if tarea_autorizada.proyecto_id is None:
+        if tarea_autorizada.asignaciones.exists() or _rol(tarea_autorizada.creador) != "alumno":
+            raise Http404
+        data = _json_body(request)
+        if data is None or set(data) - {"calificacion", "retroalimentacion"}:
+            return JsonResponse({"error": "La solicitud de devolución no es válida."}, status=400)
+        if not data:
+            return JsonResponse({"error": "Incluye una calificación o un comentario."}, status=400)
+        raw_grade = data.get("calificacion", tarea_autorizada.calificacion)
+        feedback = data.get("retroalimentacion", tarea_autorizada.retroalimentacion)
+        try:
+            grade = None if raw_grade in (None, "") else forms.DecimalField(
+                max_digits=5, decimal_places=2, min_value=0, max_value=settings.EDUFLOW_GRADE_MAX,
+            ).clean(raw_grade)
+            if not isinstance(feedback, str) or len(feedback) > 20000:
+                raise ValueError
+            feedback = feedback.strip()
+            if grade is None and not feedback:
+                raise ValueError
+        except (ValidationError, TypeError, ValueError):
+            return JsonResponse({"error": "Incluye un comentario o una calificación válida."}, status=400)
+        with transaction.atomic():
+            tarea = get_object_or_404(Tarea.objects.select_for_update(), pk=pk, proyecto__isnull=True)
+            if not profesor_supervisa_alumno(request.user, tarea.creador) or tarea.asignaciones.exists():
+                raise Http404
+            tarea.calificacion = grade
+            tarea.retroalimentacion = feedback
+            tarea.evaluado_por = request.user
+            tarea.save(update_fields=("calificacion", "retroalimentacion", "evaluado_por"))
+            from core.models import Actividad, Notificacion
+            message = f"Tu tarea {tarea.titulo} recibió una devolución docente."
+            if grade is not None:
+                message = f"Tu tarea {tarea.titulo} fue calificada: {grade}."
+            Notificacion.objects.create(usuario=tarea.creador, tarea=tarea, tipo="calificacion" if grade is not None else "comentario", mensaje=message)
+            Actividad.objects.create(usuario=tarea.creador, tarea=tarea, tipo="calificacion" if grade is not None else "comentario", descripcion=message)
+        return JsonResponse({"tarea": _serializar(tarea, request.user)})
+
     tarea = get_object_or_404(Tarea.objects.select_related("proyecto").filter(proyecto__isnull=False), pk=pk)
     if not profesor_autorizado(request.user, tarea.proyecto):
         raise Http404

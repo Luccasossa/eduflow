@@ -762,7 +762,15 @@
         navItems.forEach((nav) => nav.classList.toggle("active", nav === item));
         $$(".section").forEach((section) => section.classList.toggle("active-section", section.id === item.dataset.section));
         const title = $("#page-title");
-        if (title) title.textContent = item.textContent.trim();
+        const section = document.getElementById(item.dataset.section);
+        if (title) title.textContent = item.dataset.title || item.textContent.trim();
+        const description = title?.parentElement.querySelector("p");
+        if (description) {
+            const sectionDescription = section?.querySelector(".section-header p")?.textContent.trim();
+            const defaults = { inicio: "Organizá tus actividades académicas en un solo lugar.", tareas: "Organizá tus tareas personales y su progreso." };
+            description.textContent = sectionDescription || defaults[item.dataset.section] || "";
+            description.hidden = !description.textContent;
+        }
     }));
     $$(".quick-card[data-section]").forEach((card) => card.addEventListener("click", () => {
         document.querySelector(`.nav-item[data-section="${card.dataset.section}"]`)?.click();

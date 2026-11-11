@@ -47,6 +47,20 @@ def _authorized_tasks(usuario, projects):
     tasks = Tarea.objects.filter(proyecto__in=projects)
     if rol_usuario(usuario) == "alumno":
         tasks = tasks | Tarea.objects.filter(creador=usuario, proyecto__isnull=True)
+    elif rol_usuario(usuario) == "profesor":
+        from django.db.models import Q
+        students = usuario.__class__.objects.filter(
+            Q(proyectos__profesores=usuario) | Q(proyectos_creados__profesores=usuario)
+        )
+        if usuario.is_superuser:
+            from usuarios.models import Usuario
+            students = Usuario.objects.filter(perfil__rol="alumno")
+        tasks = tasks | Tarea.objects.filter(
+            creador__in=students,
+            creador__perfil__rol="alumno",
+            proyecto__isnull=True,
+            asignaciones__isnull=True,
+        )
     return tasks.distinct()
 
 
