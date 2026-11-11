@@ -44,6 +44,30 @@ def _es_integrante(proyecto, usuario):
     return proyecto.creador_id == usuario.id or proyecto.integrantes.filter(pk=usuario.pk).exists()
 
 
+def _calificacion_tarea_visible(tarea, usuario):
+    if usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
+        if tarea.proyecto_id:
+            own = tarea.devoluciones.filter(
+                autor=usuario, anulada_en__isnull=True,
+            ).order_by("-fecha_creacion", "-pk").first()
+            return (own.calificacion, own.comentario) if own else (None, "")
+        if tarea.evaluado_por_id != usuario.pk:
+            return None, ""
+    return tarea.calificacion, tarea.retroalimentacion
+
+
+def _devoluciones_tarea_visibles(tarea, usuario):
+    entries = tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
+    if usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
+        entries = entries.filter(autor=usuario)
+    elif usuario and _rol(usuario) == "alumno":
+        entries = entries.filter(anulada_en__isnull=True).filter(
+            Q(tipo="historica", tarea=tarea) | Q(tipo="grupal")
+            | Q(tipo="individual", alumno=usuario)
+        )
+    return entries
+
+
 def _proyecto_visible(request, pk):
     proyecto = get_object_or_404(Proyecto.objects.prefetch_related("integrantes", "profesores"), pk=pk)
     if profesor_autorizado(request.user, proyecto):
@@ -64,6 +88,29 @@ def _serializar_proyecto(proyecto, usuario=None):
     total = len(tareas)
     completadas = sum(t.estado == "completada" for t in tareas)
     progreso = round(completadas * 100 / total) if total else 0
+
+    def serialize_task(tarea):
+        grade, feedback = _calificacion_tarea_visible(tarea, usuario)
+        return {
+            "id": tarea.id,
+            "proyecto_id": tarea.proyecto_id,
+            "titulo": tarea.titulo,
+            "descripcion": tarea.descripcion,
+            "fecha_vencimiento": tarea.fecha_vencimiento.isoformat() if tarea.fecha_vencimiento else "",
+            "fecha_creacion": tarea.fecha_creacion.isoformat(),
+            "prioridad": tarea.prioridad,
+            "estado": tarea.estado,
+            "puede_adjuntar": bool(usuario and _rol(usuario) == "alumno" and alumno_integrante(usuario, proyecto)),
+            "creador": tarea.creador.get_full_name() or tarea.creador.dni,
+            "calificacion": str(grade) if grade is not None else "",
+            "retroalimentacion": feedback,
+            "archivos_adjuntos": [
+                {"id": f.pk, "nombre": f.nombre_original, "tipo": f.tipo, "extension": f.nombre_original.rsplit(".", 1)[-1].upper() if "." in f.nombre_original else "Archivo", "tamano": f.tamano, "fecha_subida": f.fecha_subida.isoformat(), "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
+                for f in tarea.archivos_adjuntos.all()
+            ],
+            "devoluciones": [_serializar_devolucion(entry, usuario) for entry in _devoluciones_tarea_visibles(tarea, usuario)],
+        }
+
     return {
         "id": proyecto.id,
         "nombre": proyecto.nombre,
@@ -77,33 +124,7 @@ def _serializar_proyecto(proyecto, usuario=None):
             {"id": miembro.id, "nombre": miembro.get_full_name() or miembro.dni}
             for miembro in integrantes
         ],
-        "tareas": [
-            {
-                "id": tarea.id,
-                "proyecto_id": tarea.proyecto_id,
-                "titulo": tarea.titulo,
-                "descripcion": tarea.descripcion,
-                "fecha_vencimiento": tarea.fecha_vencimiento.isoformat() if tarea.fecha_vencimiento else "",
-                "fecha_creacion": tarea.fecha_creacion.isoformat(),
-                "prioridad": tarea.prioridad,
-                "estado": tarea.estado,
-                "puede_adjuntar": bool(usuario and _rol(usuario) == "alumno" and alumno_integrante(usuario, proyecto)),
-                "creador": tarea.creador.get_full_name() or tarea.creador.dni,
-                "calificacion": str(tarea.calificacion) if tarea.calificacion is not None else "",
-                "retroalimentacion": tarea.retroalimentacion,
-                "archivos_adjuntos": [
-                    {"id": f.pk, "nombre": f.nombre_original, "tipo": f.tipo, "extension": f.nombre_original.rsplit(".", 1)[-1].upper() if "." in f.nombre_original else "Archivo", "tamano": f.tamano, "fecha_subida": f.fecha_subida.isoformat(), "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
-                    for f in tarea.archivos_adjuntos.all()
-                ],
-                "devoluciones": [
-                    _serializar_devolucion(entry, usuario)
-                    for entry in tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
-                    if not (usuario and _rol(usuario) == "alumno")
-                    or (entry.anulada_en is None and (entry.tipo == "historica" or entry.tipo == "grupal" or (entry.tipo == "individual" and entry.alumno_id == usuario.pk)))
-                ],
-            }
-            for tarea in tareas
-        ],
+        "tareas": [serialize_task(tarea) for tarea in tareas],
         "devoluciones": [
             _serializar_devolucion(d, usuario)
             for d in _devoluciones_visibles(proyecto, usuario)
@@ -125,6 +146,8 @@ def _devoluciones_visibles(proyecto, usuario):
             | Q(tipo="grupal", anulada_en__isnull=True)
             | Q(tipo="individual", alumno=usuario, anulada_en__isnull=True)
         )
+    elif usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
+        entries = entries.filter(autor=usuario)
     return entries
 
 
@@ -146,7 +169,7 @@ def _serializar_devolucion(d, usuario=None):
         "anulada_en": d.anulada_en.isoformat() if d.anulada_en else "",
         "anulada_por": (d.anulada_por.get_full_name() or d.anulada_por.dni) if d.anulada_por_id else "",
         "reemplaza_id": d.reemplaza_id,
-        "puede_editar": bool(usuario and _rol(usuario) == "profesor" and d.autor_id == usuario.pk and d.anulada_en is None),
+        "puede_editar": bool(usuario and _rol(usuario) == "profesor" and (d.autor_id == usuario.pk or usuario.is_superuser) and d.anulada_en is None),
     }
 
 
@@ -305,8 +328,8 @@ def api_devolucion(request, pk):
     entry = get_object_or_404(DevolucionDocente.objects.select_related("proyecto", "tarea", "documento", "alumno"), pk=pk)
     if not profesor_autorizado(request.user, entry.proyecto):
         raise Http404
-    if entry.autor_id != request.user.pk:
-        return JsonResponse({"error": "Solo quien publicó la devolución puede modificarla."}, status=403)
+    if entry.autor_id != request.user.pk and not request.user.is_superuser:
+        raise Http404
     if entry.anulada_en is not None:
         return JsonResponse({"error": "La devolución ya no está vigente."}, status=409)
     if request.method == "DELETE":

@@ -68,6 +68,18 @@ def _serializar(tarea, usuario=None):
 
     sincronizar_prioridades((tarea,))
     devoluciones = tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
+    calificacion = tarea.calificacion
+    retroalimentacion = tarea.retroalimentacion
+    if usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
+        devoluciones = devoluciones.filter(autor=usuario)
+        if tarea.proyecto_id:
+            propia = tarea.devoluciones.filter(
+                autor=usuario, anulada_en__isnull=True,
+            ).order_by("-fecha_creacion", "-pk").first()
+            calificacion = propia.calificacion if propia else None
+            retroalimentacion = propia.comentario if propia else ""
+        elif tarea.evaluado_por_id != usuario.pk:
+            calificacion, retroalimentacion = None, ""
     if usuario and _rol(usuario) == "alumno":
         devoluciones = devoluciones.filter(anulada_en__isnull=True).filter(
             Q(tipo="historica", tarea=tarea) | Q(tipo="grupal") | Q(tipo="individual", alumno=usuario)
@@ -83,8 +95,8 @@ def _serializar(tarea, usuario=None):
         "puede_adjuntar": bool(usuario and _rol(usuario) == "alumno" and (tarea.creador_id == usuario.pk or tarea.proyecto_id and (tarea.proyecto.creador_id == usuario.pk or tarea.proyecto.integrantes.filter(pk=usuario.pk).exists()))),
         "puede_editar": bool(usuario and _rol(usuario) == "alumno" and (tarea.creador_id == usuario.pk or tarea.proyecto_id and (tarea.proyecto.creador_id == usuario.pk or tarea.proyecto.integrantes.filter(pk=usuario.pk).exists())) and not tarea.asignaciones.exists()),
         "puede_entregar": bool(usuario and _rol(usuario) == "alumno" and tarea.proyecto_id is None and tarea.asignaciones.filter(alumno=usuario).exists() and not tarea.entregas.filter(alumno=usuario).exists()),
-        "calificacion": str(tarea.calificacion) if tarea.calificacion is not None else "",
-        "retroalimentacion": tarea.retroalimentacion,
+        "calificacion": str(calificacion) if calificacion is not None else "",
+        "retroalimentacion": retroalimentacion,
         "archivos_adjuntos": [
             {"id": f.pk, "nombre": f.nombre_original, "tipo": f.tipo, "extension": f.nombre_original.rsplit(".", 1)[-1].upper() if "." in f.nombre_original else "Archivo", "tamano": f.tamano, "fecha_subida": f.fecha_subida.isoformat(), "abrir": f"/archivos/api/{f.pk}/descargar/?inline=1", "descarga": f"/archivos/api/{f.pk}/descargar/", "puede_quitar": bool(usuario and f.propietario_id == usuario.pk)}
             for f in Archivo.objects.filter(Q(tareas_adjuntas=tarea) | Q(tarea=tarea)).distinct()
@@ -386,6 +398,10 @@ def api_calificar_tarea(request, pk):
     if tarea_autorizada.proyecto_id is None:
         if tarea_autorizada.asignaciones.exists() or _rol(tarea_autorizada.creador) != "alumno":
             raise Http404
+        if (tarea_autorizada.evaluado_por_id
+                and tarea_autorizada.evaluado_por_id != request.user.pk
+                and not request.user.is_superuser):
+            raise Http404
         data = _json_body(request)
         if data is None or set(data) - {"calificacion", "retroalimentacion"}:
             return JsonResponse({"error": "La solicitud de devolución no es válida."}, status=400)
@@ -598,10 +614,12 @@ def _serializar_evaluacion(evaluacion, usuario=None):
     }
 
 
-def _evaluaciones_vigentes(tarea):
+def _evaluaciones_vigentes(tarea, usuario=None):
     from proyectos.models import DevolucionDocente
 
     entries = DevolucionDocente.objects.filter(tarea=tarea, anulada_en__isnull=True)
+    if usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
+        entries = entries.filter(autor=usuario)
     grupal = entries.filter(tipo="grupal").select_related("autor").order_by("-fecha_creacion", "-pk").first()
     individuales = entries.filter(tipo="individual").select_related("autor", "alumno").order_by("alumno_id", "-fecha_creacion", "-pk")
     return grupal, individuales
@@ -613,15 +631,18 @@ def api_evaluaciones(request, pk):
     tarea = _tarea_autorizada(request, pk)
     if tarea.proyecto_id is None:
         raise Http404
-    grupal, individuales = _evaluaciones_vigentes(tarea)
+    grupal, individuales = _evaluaciones_vigentes(tarea, request.user)
     if _rol(request.user) == "alumno":
         individuales = individuales.filter(alumno=request.user)
+    historial = tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
+    if _rol(request.user) == "profesor" and not request.user.is_superuser:
+        historial = historial.filter(autor=request.user)
     return JsonResponse({
         "grupal": _serializar_evaluacion(grupal, request.user) if grupal else None,
         "individuales": [_serializar_evaluacion(item, request.user) for item in individuales],
         "historial": [
             _serializar_evaluacion(item, request.user)
-            for item in tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
+            for item in historial
             if _rol(request.user) != "alumno" or (
                 item.anulada_en is None and (item.tipo == "grupal" or (item.tipo == "individual" and item.alumno_id == request.user.pk))
             )
@@ -687,6 +708,8 @@ def _guardar_o_anular_evaluacion(request, pk, tipo, alumno_id=None):
             tipo=tipo,
             anulada_en__isnull=True,
         )
+        if _rol(request.user) == "profesor" and not request.user.is_superuser:
+            actuales = actuales.filter(autor=request.user)
         if alumno_id is not None:
             actuales = actuales.filter(alumno_id=alumno_id)
         else:
@@ -699,6 +722,13 @@ def _guardar_o_anular_evaluacion(request, pk, tipo, alumno_id=None):
             actual.anulada_en = timezone.now()
             actual.anulada_por = request.user
             actual.save(update_fields=("anulada_en", "anulada_por"))
+            latest = DevolucionDocente.objects.filter(
+                tarea=tarea, anulada_en__isnull=True,
+            ).order_by("-fecha_creacion", "-pk").first()
+            tarea.calificacion = latest.calificacion if latest else None
+            tarea.retroalimentacion = latest.comentario if latest else ""
+            tarea.evaluado_por = latest.autor if latest else None
+            tarea.save(update_fields=("calificacion", "retroalimentacion", "evaluado_por"))
             return JsonResponse({"eliminada": True})
 
         evaluacion = DevolucionDocente(
