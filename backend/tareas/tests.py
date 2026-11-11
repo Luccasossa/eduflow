@@ -490,6 +490,35 @@ class TablerosTests(TestCase):
             [first_group.json()["evaluacion"]["id"], second_group_id],
         )
 
+    def test_historial_ignora_devoluciones_con_proyecto_inconsistente(self):
+        from proyectos.models import DevolucionDocente
+
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Comunicación")
+        otro_proyecto = self.crear_proyecto()
+        otra_tarea = Tarea.objects.create(creador=self.alumno, proyecto=otro_proyecto, titulo="Proyecto ajeno")
+
+        # Simula filas históricas inválidas cargadas antes de la validación del modelo.
+        DevolucionDocente.objects.bulk_create([
+            DevolucionDocente(
+                proyecto=otro_proyecto, tarea=tarea, autor=self.profesor,
+                comentario="La tarea apunta a un proyecto distinto", tipo="historica",
+            ),
+            DevolucionDocente(
+                proyecto=proyecto, tarea=otra_tarea, autor=self.profesor,
+                comentario="El proyecto apunta a una tarea ajena", tipo="historica",
+            ),
+        ])
+
+        self.client.force_login(self.profesor)
+        task_history = self.client.get(reverse("api_evaluaciones", args=[tarea.pk])).json()
+        self.assertEqual(task_history["historial"], [])
+        self.assertIsNone(task_history["grupal"])
+        project = self.client.get(reverse("api_proyecto", args=[proyecto.pk])).json()["proyecto"]
+        self.assertEqual(project["devoluciones"], [])
+        self.assertEqual(project["tareas"][0]["devoluciones"], [])
+
     def test_calificaciones_de_tarea_compartida_se_mantienen_independientes_por_docente(self):
         from proyectos.models import DevolucionDocente
 

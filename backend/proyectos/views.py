@@ -57,7 +57,9 @@ def _calificacion_tarea_visible(tarea, usuario):
 
 
 def _devoluciones_tarea_visibles(tarea, usuario):
-    entries = tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
+    entries = tarea.devoluciones.filter(proyecto_id=tarea.proyecto_id).select_related(
+        "autor", "alumno",
+    ).order_by("fecha_creacion", "pk")
     if usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
         entries = entries.filter(autor=usuario)
     elif usuario and _rol(usuario) == "alumno":
@@ -139,7 +141,10 @@ def _serializar_proyecto(proyecto, usuario=None):
 def _devoluciones_visibles(proyecto, usuario):
     entries = proyecto.devoluciones.select_related(
         "autor", "tarea", "documento", "alumno", "anulada_por",
-    ).all()
+    ).filter(
+        Q(tarea__isnull=True) | Q(tarea__proyecto_id=proyecto.pk),
+        Q(documento__isnull=True) | Q(documento__proyecto_id=proyecto.pk),
+    )
     if usuario and _rol(usuario) == "alumno":
         entries = entries.filter(
             Q(tipo="historica")

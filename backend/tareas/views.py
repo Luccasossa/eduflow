@@ -67,7 +67,9 @@ def _serializar(tarea, usuario=None):
     from archivos.models import Archivo
 
     sincronizar_prioridades((tarea,))
-    devoluciones = tarea.devoluciones.select_related("autor", "alumno", "proyecto", "tarea").order_by("fecha_creacion", "pk")
+    devoluciones = tarea.devoluciones.filter(proyecto_id=tarea.proyecto_id).select_related(
+        "autor", "alumno", "proyecto", "tarea",
+    ).order_by("fecha_creacion", "pk")
     calificacion = tarea.calificacion
     retroalimentacion = tarea.retroalimentacion
     if usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
@@ -620,7 +622,9 @@ def _serializar_evaluacion(evaluacion, usuario=None):
 def _evaluaciones_vigentes(tarea, usuario=None):
     from proyectos.models import DevolucionDocente
 
-    entries = DevolucionDocente.objects.filter(tarea=tarea, anulada_en__isnull=True)
+    entries = DevolucionDocente.objects.filter(
+        tarea=tarea, proyecto_id=tarea.proyecto_id, anulada_en__isnull=True,
+    )
     if usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
         entries = entries.filter(autor=usuario)
     grupal = entries.filter(tipo="grupal").select_related("autor").order_by("-fecha_creacion", "-pk").first()
@@ -637,7 +641,9 @@ def api_evaluaciones(request, pk):
     grupal, individuales = _evaluaciones_vigentes(tarea, request.user)
     if _rol(request.user) == "alumno":
         individuales = individuales.filter(alumno=request.user)
-    historial = tarea.devoluciones.select_related("autor", "alumno", "proyecto", "tarea").order_by("fecha_creacion", "pk")
+    historial = tarea.devoluciones.filter(proyecto_id=tarea.proyecto_id).select_related(
+        "autor", "alumno", "proyecto", "tarea",
+    ).order_by("fecha_creacion", "pk")
     if _rol(request.user) == "profesor" and not request.user.is_superuser:
         historial = historial.filter(autor=request.user)
     return JsonResponse({
