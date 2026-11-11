@@ -1966,8 +1966,15 @@ nav {
                         });
                         box.appendChild(form);
                         if (current) {
-                            var remove = el('button', 'text-button danger-text', 'Eliminar devolución'); remove.type = 'button';
-                            remove.addEventListener('click', function () { requestJson('/tareas/entregas/' + delivery.id + '/correccion/', {method:'DELETE', headers:{'X-CSRFToken':csrfToken()}}).then(function () { openTeacherAssignedTask(assignment); toast('Devolución eliminada.'); }).catch(function (err) { toast(err.message); }); });
+                            var removeGrade = current.calificacion !== '';
+                            var remove = el('button', 'text-button danger-text', removeGrade ? 'Anular calificaci\u00f3n' : 'Eliminar devoluci\u00f3n'); remove.type = 'button';
+                            remove.addEventListener('click', function () {
+                                var confirmation = removeGrade
+                                    ? 'La calificaci\u00f3n y sus versiones anteriores se eliminar\u00e1n definitivamente. La entrega y su archivo permanecer\u00e1n intactos. \u00bfContinuar?'
+                                    : 'La devoluci\u00f3n y sus versiones anteriores se eliminar\u00e1n definitivamente. La entrega y su archivo permanecer\u00e1n intactos. \u00bfContinuar?';
+                                if (!window.confirm(confirmation)) return;
+                                requestJson('/tareas/entregas/' + delivery.id + '/correccion/', {method:'DELETE', headers:{'X-CSRFToken':csrfToken()}}).then(function () { openTeacherAssignedTask(assignment); toast(removeGrade ? 'Calificaci\u00f3n eliminada.' : 'Devoluci\u00f3n eliminada.'); }).catch(function (err) { toast(err.message); });
+                            });
                             box.appendChild(remove);
                         }
                     }).catch(function (err) { box.appendChild(el('p', 'form-error', err.message)); });

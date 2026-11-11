@@ -14,6 +14,10 @@ class Notificacion(models.Model):
     fecha_creacion = models.DateTimeField(auto_now_add=True)
     tipo = models.CharField(max_length=20, choices=TIPOS, default="general")
     tarea = models.ForeignKey("tareas.Tarea", on_delete=models.CASCADE, null=True, blank=True, related_name="notificaciones")
+    correccion_entrega = models.ForeignKey(
+        "tareas.CorreccionEntrega", on_delete=models.CASCADE, null=True, blank=True,
+        related_name="notificaciones",
+    )
 
     def __str__(self):
         return self.mensaje
@@ -32,6 +36,10 @@ class Actividad(models.Model):
     tarea = models.ForeignKey("tareas.Tarea", on_delete=models.SET_NULL, null=True, blank=True, related_name="actividades")
     proyecto = models.ForeignKey("proyectos.Proyecto", on_delete=models.SET_NULL, null=True, blank=True, related_name="actividades")
     archivo = models.ForeignKey("archivos.Archivo", on_delete=models.SET_NULL, null=True, blank=True, related_name="actividades")
+    correccion_entrega = models.ForeignKey(
+        "tareas.CorreccionEntrega", on_delete=models.CASCADE, null=True, blank=True,
+        related_name="actividades",
+    )
 
     def __str__(self):
         return self.descripcion

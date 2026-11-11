@@ -561,12 +561,43 @@ def api_correccion_entrega(request, pk):
     if _rol(request.user) != "profesor":
         return JsonResponse({"error": "Solo el docente asignado puede corregir esta entrega."}, status=403)
     if request.method == "DELETE":
-        if not current:
-            raise Http404
-        current.anulada_en, current.anulada_por = timezone.now(), request.user
-        current.save(update_fields=("anulada_en", "anulada_por"))
-        entrega.estado = "entregada"
-        entrega.save(update_fields=("estado",))
+        # A grade is a chain of CorreccionEntrega versions. Remove only the
+        # connected chain for this delivery and assigned teacher. Never delete
+        # the Entrega or touch its file, status, or student supplied fields.
+        with transaction.atomic():
+            entrega = get_object_or_404(
+                Entrega.objects.select_for_update().select_related("tarea", "alumno"),
+                pk=pk,
+                tarea__proyecto__isnull=True,
+            )
+            assignment = AsignacionTarea.objects.filter(
+                tarea=entrega.tarea, alumno=entrega.alumno, profesor=request.user,
+            ).first()
+            if not assignment:
+                raise Http404
+            versions = list(CorreccionEntrega.objects.select_for_update().filter(
+                entrega=entrega, profesor=request.user,
+            ).values_list("pk", "reemplaza_id", "anulada_en"))
+            current = next((pk for pk, _, anulada_en in versions if anulada_en is None), None)
+            if current is None:
+                raise Http404
+
+            # Include ancestors and descendants connected by `reemplaza`; leave
+            # any independent correction row for this delivery untouched.
+            component = {current}
+            changed = True
+            while changed:
+                changed = False
+                for version_id, replaces_id, _ in versions:
+                    if version_id in component or replaces_id in component:
+                        before = len(component)
+                        component.add(version_id)
+                        if replaces_id is not None:
+                            component.add(replaces_id)
+                        changed = changed or len(component) != before
+            CorreccionEntrega.objects.filter(
+                pk__in=component, entrega=entrega, profesor=request.user,
+            ).delete()
         return JsonResponse({"eliminada": True})
     data = _json_body(request)
     if data is None:
@@ -594,8 +625,14 @@ def api_correccion_entrega(request, pk):
         message = f"El docente publicó una devolución para tu tarea {entrega.tarea.titulo}."
         if grade is not None:
             message = f"Tu tarea {entrega.tarea.titulo} fue calificada: {grade}."
-        Notificacion.objects.create(usuario=entrega.alumno, tarea=entrega.tarea, tipo="calificacion" if grade is not None else "comentario", mensaje=message)
-        Actividad.objects.create(usuario=entrega.alumno, tarea=entrega.tarea, tipo="calificacion" if grade is not None else "comentario", descripcion=message)
+        Notificacion.objects.create(
+            usuario=entrega.alumno, tarea=entrega.tarea, correccion_entrega=correction,
+            tipo="calificacion" if grade is not None else "comentario", mensaje=message,
+        )
+        Actividad.objects.create(
+            usuario=entrega.alumno, tarea=entrega.tarea, correccion_entrega=correction,
+            tipo="calificacion" if grade is not None else "comentario", descripcion=message,
+        )
     return JsonResponse({"correccion": _serializar_correccion(correction)}, status=201)
 
 

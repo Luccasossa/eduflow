@@ -1128,6 +1128,15 @@ class TablerosTests(TestCase):
         self.assertEqual(assigned.status_code, 201, assigned.content)
         tarea = Tarea.objects.get(pk=assigned.json()["asignacion"]["tarea_id"])
         self.assertEqual(AsignacionTarea.objects.get(tarea=tarea).profesor, self.profesor)
+        from archivos.models import Archivo
+        task_file = Archivo.objects.create(
+            propietario=self.alumno,
+            archivo=SimpleUploadedFile("consigna.pdf", b"%PDF-1.4 consigna"),
+            nombre_original="consigna.pdf",
+            tipo="application/pdf",
+        )
+        self.addCleanup(task_file.archivo.storage.delete, task_file.archivo.name)
+        tarea.archivos_adjuntos.add(task_file)
 
         student_client = Client()
         student_client.force_login(self.alumno)
@@ -1169,9 +1178,67 @@ class TablerosTests(TestCase):
         self.assertEqual(visible["comentario"], "Revisar la conclusión")
         self.assertEqual(Entrega.objects.get(pk=delivery_id).estado, "rechazada")
 
+        self.client.force_login(self.otro_profesor)
+        self.assertEqual(self.client.delete(correction_url).status_code, 404)
+        self.assertTrue(delivery.correcciones.filter(anulada_en__isnull=True).exists())
+        self.client.force_login(self.profesor)
+        delivery.refresh_from_db()
+        original_delivery_data = {
+            "id": delivery.pk,
+            "archivo": delivery.archivo.name,
+            "fecha_entrega": delivery.fecha_entrega,
+            "estado": delivery.estado,
+            "observaciones": delivery.observaciones,
+            "devolucion": delivery.devolucion,
+            "alumno_id": delivery.alumno_id,
+            "tarea_id": delivery.tarea_id,
+        }
+        old_correction_ids = set(delivery.correcciones.values_list("pk", flat=True))
+        self.assertGreaterEqual(len(old_correction_ids), 3)
+        from core.models import Actividad, Notificacion
+        unrelated_notice = Notificacion.objects.create(
+            usuario=self.alumno, tarea=tarea, mensaje="Aviso independiente",
+        )
+        unrelated_activity = Actividad.objects.create(
+            usuario=self.alumno, tarea=tarea, descripcion="Actividad independiente",
+        )
+        self.assertEqual(Notificacion.objects.filter(correccion_entrega_id__in=old_correction_ids).count(), len(old_correction_ids))
+        self.assertEqual(Actividad.objects.filter(correccion_entrega_id__in=old_correction_ids).count(), len(old_correction_ids))
+
         self.assertEqual(self.client.delete(correction_url).status_code, 200)
+        self.assertFalse(CorreccionEntrega.objects.filter(pk__in=old_correction_ids).exists())
+        self.assertFalse(delivery.correcciones.exists())
+        self.assertFalse(Notificacion.objects.filter(correccion_entrega_id__in=old_correction_ids).exists())
+        self.assertFalse(Actividad.objects.filter(correccion_entrega_id__in=old_correction_ids).exists())
+        self.assertTrue(Notificacion.objects.filter(pk=unrelated_notice.pk).exists())
+        self.assertTrue(Actividad.objects.filter(pk=unrelated_activity.pk).exists())
         self.assertIsNone(student_client.get(correction_url).json()["correccion"])
-        self.assertEqual(Entrega.objects.get(pk=delivery_id).estado, "entregada")
+        delivery.refresh_from_db()
+        self.assertEqual({
+            "id": delivery.pk,
+            "archivo": delivery.archivo.name,
+            "fecha_entrega": delivery.fecha_entrega,
+            "estado": delivery.estado,
+            "observaciones": delivery.observaciones,
+            "devolucion": delivery.devolucion,
+            "alumno_id": delivery.alumno_id,
+            "tarea_id": delivery.tarea_id,
+        }, original_delivery_data)
+        self.assertTrue(delivery.archivo.storage.exists(delivery.archivo.name))
+        self.assertTrue(Archivo.objects.filter(pk=task_file.pk).exists())
+        self.assertTrue(tarea.archivos_adjuntos.filter(pk=task_file.pk).exists())
+        self.assertTrue(task_file.archivo.storage.exists(task_file.archivo.name))
+        download = self.client.get(reverse("descargar_entrega", args=[delivery.pk]))
+        self.assertEqual(download.status_code, 200)
+        self.assertIn(b"%PDF-1.7 entrega", b"".join(download.streaming_content))
+        download.close()
+        self.assertEqual(self.client.get(correction_url).json()["historial"], [])
+
+        new_grade = self.json_post(correction_url, {"calificacion": "9.25", "comentario": "Nueva evaluaciÃ³n"})
+        self.assertEqual(new_grade.status_code, 201, new_grade.content)
+        self.assertNotIn(new_grade.json()["correccion"]["id"], old_correction_ids)
+        self.assertEqual(student_client.get(correction_url).json()["correccion"]["calificacion"], "9.25")
+        self.assertTrue(Entrega.objects.filter(pk=delivery.pk).exists())
         self.client.force_login(self.ajeno)
         self.assertEqual(self.client.get(reverse("api_tarea", args=[tarea.pk])).status_code, 404)
         self.assertEqual(self.client.get(correction_url).status_code, 404)
