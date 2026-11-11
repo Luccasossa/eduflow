@@ -2020,6 +2020,26 @@ nav {
                     edit.addEventListener('click', function () { openTeacherDocument(doc, false); });
                     card.appendChild(edit);
                 }
+                if (doc.puede_eliminar) {
+                    var remove = el('button', 'text-button', 'Eliminar');
+                    remove.type = 'button';
+                    remove.addEventListener('click', function () {
+                        if (!window.confirm('¿Eliminar "' + doc.titulo + '"?')) return;
+                        remove.disabled = true;
+                        requestJson('/documentos/api/' + doc.id + '/eliminar/', {
+                            method: 'POST',
+                            headers: {'X-CSRFToken': csrfToken()}
+                        }).then(function () {
+                            return loadProjects();
+                        }).then(function () {
+                            toast('Documento eliminado.');
+                        }).catch(function (error) {
+                            toast(error.message);
+                            remove.disabled = false;
+                        });
+                    });
+                    card.appendChild(remove);
+                }
                 if (doc.proyecto_id) card.appendChild(makeDocumentReviewControl(doc));
                 documentList.appendChild(card);
             });

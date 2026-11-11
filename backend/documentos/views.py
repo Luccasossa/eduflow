@@ -2,11 +2,12 @@ import json
 
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
+from django.db.models.deletion import ProtectedError
 from django import forms
 from django.core.exceptions import ValidationError
 from django.http import Http404, HttpResponseForbidden, JsonResponse
 from django.shortcuts import get_object_or_404, redirect
-from django.views.decorators.http import require_GET, require_http_methods
+from django.views.decorators.http import require_GET, require_http_methods, require_POST
 from django.conf import settings
 
 from proyectos.models import Proyecto
@@ -187,6 +188,25 @@ def api_documento(request, pk):
             actual.estado_revision = "pendiente"
         actual.save(update_fields=("titulo", "contenido", "version", "fecha_actualizacion", "estado_revision"))
     return JsonResponse({"documento": _serializar(actual, request.user)})
+
+
+@login_required
+@require_POST
+def api_eliminar_documento_profesor(request, pk):
+    if _rol(request.user) != "profesor":
+        return JsonResponse({"error": "Solo el profesor autor puede eliminar este documento."}, status=403)
+    documento = get_object_or_404(
+        Documento.objects.select_related("creador", "proyecto"), pk=pk,
+    )
+    if not _visible_a(documento, request.user):
+        raise Http404
+    if documento.creador_id != request.user.pk:
+        return JsonResponse({"error": "Solo quien creó el documento puede eliminarlo."}, status=403)
+    try:
+        documento.delete()
+    except ProtectedError:
+        return JsonResponse({"error": "No se puede eliminar porque conserva un historial académico asociado."}, status=409)
+    return JsonResponse({"eliminado": True})
 
 
 @login_required

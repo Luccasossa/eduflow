@@ -88,6 +88,45 @@ class DocumentosTests(TestCase):
         self.client.force_login(self.alumno)
         self.assertEqual(self.client.delete(reverse("api_documento", args=[documento.id])).status_code, 200)
 
+    def test_eliminacion_docente_por_post_solo_permite_al_autor(self):
+        otro_profesor = self.usuario("60100007", "profesor")
+        proyecto = Proyecto.objects.create(nombre="Material de cátedra", creador=self.alumno)
+        proyecto.profesores.add(self.profesor, otro_profesor)
+        documento = Documento.objects.create(titulo="Guía docente", creador=self.profesor, proyecto=proyecto)
+        url = reverse("api_eliminar_documento_profesor", args=[documento.pk])
+
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.get(url).status_code, 405)
+        self.assertEqual(self.client.delete(url).status_code, 405)
+
+        self.client.force_login(otro_profesor)
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.assertTrue(Documento.objects.filter(pk=documento.pk).exists())
+
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.post(url).status_code, 403)
+        self.assertTrue(Documento.objects.filter(pk=documento.pk).exists())
+
+        self.client.force_login(self.profesor)
+        self.assertEqual(self.client.post(url).status_code, 200)
+        self.assertFalse(Documento.objects.filter(pk=documento.pk).exists())
+
+    def test_eliminar_documento_con_devolucion_no_borra_historial(self):
+        from proyectos.models import DevolucionDocente
+
+        proyecto = Proyecto.objects.create(nombre="Historial docente", creador=self.alumno)
+        proyecto.profesores.add(self.profesor)
+        documento = Documento.objects.create(titulo="Informe", creador=self.profesor, proyecto=proyecto)
+        devolucion = DevolucionDocente.objects.create(
+            proyecto=proyecto, documento=documento, autor=self.profesor,
+            comentario="Devolución conservada",
+        )
+        self.client.force_login(self.profesor)
+        response = self.client.post(reverse("api_eliminar_documento_profesor", args=[documento.pk]))
+        self.assertEqual(response.status_code, 409)
+        self.assertTrue(Documento.objects.filter(pk=documento.pk).exists())
+        self.assertTrue(DevolucionDocente.objects.filter(pk=devolucion.pk).exists())
+
     def test_retirar_integrante_revoca_acceso_a_documento_del_proyecto(self):
         proyecto = Proyecto.objects.create(nombre="Equipo", creador=self.alumno)
         proyecto.profesores.add(self.profesor)
