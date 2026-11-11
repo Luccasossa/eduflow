@@ -429,7 +429,10 @@ class TablerosTests(TestCase):
         first_feedback_id = project_feedback.json()["devolucion"]["id"]
 
         self.client.force_login(self.otro_profesor)
-        self.assertEqual(self.client.get(project_feedback_url).json()["devoluciones"], [])
+        switched_project_response = self.client.get(project_feedback_url)
+        self.assertEqual(switched_project_response.json()["devoluciones"], [])
+        self.assertIn("no-store", switched_project_response["Cache-Control"])
+        self.assertIn("Cookie", switched_project_response["Vary"])
         self.assertEqual(self.client.get(task_evaluations_url).json()["grupal"], None)
         self.assertEqual(self.client.get(task_evaluations_url).json()["historial"], [])
         project_view = self.client.get(reverse("api_proyecto", args=[proyecto.pk])).json()["proyecto"]
@@ -463,7 +466,9 @@ class TablerosTests(TestCase):
         self.assertTrue(DevolucionDocente.objects.filter(pk=first_group.json()["evaluacion"]["id"], anulada_en__isnull=True).exists())
 
         self.client.force_login(self.profesor)
-        self.assertEqual([entry["id"] for entry in self.client.get(task_evaluations_url).json()["historial"]], [first_group.json()["evaluacion"]["id"]])
+        switched_back_response = self.client.get(task_evaluations_url)
+        self.assertEqual([entry["id"] for entry in switched_back_response.json()["historial"]], [first_group.json()["evaluacion"]["id"]])
+        self.assertIn("no-store", switched_back_response["Cache-Control"])
         self.assertEqual(self.client.get(task_evaluations_url).json()["grupal"]["calificacion"], "8.50")
         self.assertCountEqual(
             [entry["id"] for entry in self.client.get(project_feedback_url).json()["devoluciones"]],

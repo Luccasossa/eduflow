@@ -55,7 +55,7 @@
     const maxDocumentContent = 1000000;
 
     async function api(url, method = "GET", data = undefined) {
-        const options = { method, headers: { Accept: "application/json" } };
+        const options = { method, cache: "no-store", headers: { Accept: "application/json" } };
         if (data !== undefined) {
             options.headers["Content-Type"] = "application/json";
             options.headers["X-CSRFToken"] = csrf;

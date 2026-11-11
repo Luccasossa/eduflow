@@ -1689,6 +1689,7 @@ nav {
 
     function requestJson(url, options) {
         options = options || {};
+        options.cache = 'no-store';
         options.headers = Object.assign({ 'Accept': 'application/json' }, options.headers || {});
         return fetch(url, options).catch(function () {
             throw new Error('No se pudo conectar con el servidor. Revisa tu conexion e intentalo de nuevo.');
