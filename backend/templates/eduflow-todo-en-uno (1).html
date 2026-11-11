@@ -2037,7 +2037,7 @@ nav {
             teacherDocuments.forEach(function (doc) {
                 var card = el('article', 'document-card');
                 var title = el('strong', null, doc.titulo);
-                var meta = el('span', null, (doc.proyecto || 'Documento institucional') + ' ? Actualizado ' + formatDate(doc.fecha_actualizacion.slice(0, 10)));
+                var meta = el('span', null, (doc.proyecto || 'Documento institucional') + ' | Creado ' + formatDate(doc.fecha_creacion.slice(0, 10)) + ' | Modificado ' + formatDate(doc.fecha_actualizacion.slice(0, 10)));
                 var view = el('button', 'text-button', 'Ver');
                 view.type = 'button';
                 view.addEventListener('click', function () { openTeacherDocument(doc, true); });
@@ -2718,23 +2718,25 @@ nav {
         list.replaceChildren();
         if (!docs.length) { list.appendChild(el('p', 'muted', 'Todavía no hay documentos guardados.')); return; }
         docs.forEach(function (doc) {
-            var card = el('details', 'document-card');
-            card.appendChild(el('summary', null, doc.titulo + ' · ' + (doc.proyecto || 'Personal')));
+            var card = el('article', 'document-card');
+            card.appendChild(el('strong', null, doc.titulo));
+            card.appendChild(el('span', null, (doc.proyecto || 'Documento personal') + ' | Creado ' + formatDate(doc.fecha_creacion.slice(0, 10)) + ' | Modificado ' + formatDate(doc.fecha_actualizacion.slice(0, 10))));
+            var view = el('button', 'text-button', 'Ver');
+            view.type = 'button';
+            view.addEventListener('click', function () { openTeacherDocument(doc, true); });
+            card.appendChild(view);
+            if (doc.puede_editar) {
+                var edit = el('button', 'text-button', 'Editar');
+                edit.type = 'button';
+                edit.addEventListener('click', function () { openTeacherDocument(doc, false); });
+                card.appendChild(edit);
+            }
             if (doc.proyecto_id) {
                 card.appendChild(el('span', 'document-review-state', 'Revisión: ' + reviewStateLabel(doc.estado_revision)));
                 card.appendChild(makeDocumentReviewControl(doc));
             }
-            var preview = el('div', 'doc-content-preview');
-            renderTeacherDocumentContent(doc.contenido, preview);
-            card.appendChild(preview);
             if (doc.retroalimentacion) card.appendChild(el('p', 'muted', 'Retroalimentación: ' + doc.retroalimentacion));
             if (doc.calificacion) card.appendChild(el('p', 'muted', 'Calificación: ' + doc.calificacion));
-            if (doc.puede_editar) {
-                var edit = el('button', 'text-button', 'Editar documento');
-                edit.type = 'button';
-                edit.addEventListener('click', function (event) { event.preventDefault(); event.stopPropagation(); openTeacherDocument(doc); });
-                card.appendChild(edit);
-            }
             list.appendChild(card);
         });
     }

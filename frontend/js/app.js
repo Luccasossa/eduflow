@@ -207,7 +207,7 @@
             card.appendChild(make("div", "document-icon", "📝"));
             const summary = make("div");
             summary.appendChild(make("strong", "", documento.titulo));
-            summary.appendChild(make("span", "", `${documento.proyecto || "Documento personal"} · Guardado ${dateLabel(documento.fecha_actualizacion.slice(0, 10))}`));
+            summary.appendChild(make("span", "", `${documento.proyecto || "Documento personal"} | Creado ${dateLabel(documento.fecha_creacion.slice(0, 10))} | Modificado ${dateLabel(documento.fecha_actualizacion.slice(0, 10))}`));
             card.appendChild(summary);
             card.appendChild(make("span", "document-review-state", documento.estado_revision ? `Revisión: ${documentReviewLabel(documento.estado_revision)}` : "Sin revisión docente"));
             if (documento.retroalimentacion) card.appendChild(make("p", "", `Devolución docente: ${documento.retroalimentacion}`));

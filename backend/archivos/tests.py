@@ -231,6 +231,15 @@ class ArchivosTests(TestCase):
         self.assertTrue(self.file_field.storage.exists(storage_name))
         self.assertEqual(self.client.get(reverse("api_tarea", args=[diseno.pk])).json()["tarea"]["archivos_adjuntos"][0]["id"], second_id)
 
+        linked_file = Archivo.objects.get(pk=second_id)
+        linked_storage_name = linked_file.archivo.name
+        deleted = self.client.delete(reverse("eliminar_archivo", args=[second_id]))
+        self.assertEqual(deleted.status_code, 200)
+        self.assertTrue(Tarea.objects.filter(pk=diseno.pk).exists())
+        self.assertFalse(diseno.archivos_adjuntos.filter(pk=second_id).exists())
+        self.assertFalse(Archivo.objects.filter(pk=second_id).exists())
+        self.assertFalse(self.file_field.storage.exists(linked_storage_name))
+
     def test_rechaza_carga_sin_archivo_y_ids_malformados(self):
         self.client.force_login(self.alumno)
         self.assertEqual(self.client.post(reverse("api_archivos")).status_code, 400)
