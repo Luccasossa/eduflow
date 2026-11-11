@@ -897,10 +897,10 @@
                 if (/\.(pdf|png|jpe?g)$/i.test(delivery.nombre)) { const open = make("a", "text-button", "Abrir entrega"); open.href = delivery.descarga + "?inline=1"; open.target = "_blank"; open.rel = "noopener noreferrer"; body.appendChild(open); }
             }); else body.appendChild(make("p", "empty-state", "No hay una entrega registrada."));
             body.appendChild(make("h3", "", "Retroalimentación docente"));
-            const feedback = [...(detail.devoluciones || [])].filter((entry) => !entry.anulada);
+            const feedback = [...(detail.devoluciones || [])];
             if (feedback.length) feedback.forEach((entry) => {
                 const item = make("article", "project-feedback-entry");
-                item.appendChild(make("strong", "", `${entry.autor} · ${dateLabel((entry.fecha || "").slice(0, 10))}`));
+                item.appendChild(make("strong", "", `${entry.anulada ? "Versión anterior · " : ""}${entry.autor} · ${dateLabel((entry.fecha || "").slice(0, 10))}`));
                 if (entry.calificacion) item.appendChild(make("p", "", `Calificación: ${entry.calificacion}`));
                 if (entry.comentario) item.appendChild(make("p", "", entry.comentario));
                 body.appendChild(item);

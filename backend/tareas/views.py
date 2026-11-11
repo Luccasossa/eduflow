@@ -67,7 +67,7 @@ def _serializar(tarea, usuario=None):
     from archivos.models import Archivo
 
     sincronizar_prioridades((tarea,))
-    devoluciones = tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
+    devoluciones = tarea.devoluciones.select_related("autor", "alumno", "proyecto", "tarea").order_by("fecha_creacion", "pk")
     calificacion = tarea.calificacion
     retroalimentacion = tarea.retroalimentacion
     if usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
@@ -81,7 +81,7 @@ def _serializar(tarea, usuario=None):
         elif tarea.evaluado_por_id != usuario.pk:
             calificacion, retroalimentacion = None, ""
     if usuario and _rol(usuario) == "alumno":
-        devoluciones = devoluciones.filter(anulada_en__isnull=True).filter(
+        devoluciones = devoluciones.filter(
             Q(tipo="historica", tarea=tarea) | Q(tipo="grupal") | Q(tipo="individual", alumno=usuario)
         )
     return {
@@ -602,6 +602,9 @@ def _serializar_evaluacion(evaluacion, usuario=None):
         "id": evaluacion.pk,
         "tipo": evaluacion.tipo,
         "tarea_id": evaluacion.tarea_id,
+        "tarea": evaluacion.tarea.titulo if evaluacion.tarea_id else "",
+        "proyecto_id": evaluacion.proyecto_id,
+        "proyecto": evaluacion.proyecto.nombre,
         "alumno_id": evaluacion.alumno_id,
         "alumno": (evaluacion.alumno.get_full_name() or evaluacion.alumno.dni)
         if evaluacion.alumno_id else "",
@@ -634,7 +637,7 @@ def api_evaluaciones(request, pk):
     grupal, individuales = _evaluaciones_vigentes(tarea, request.user)
     if _rol(request.user) == "alumno":
         individuales = individuales.filter(alumno=request.user)
-    historial = tarea.devoluciones.select_related("autor", "alumno").order_by("fecha_creacion", "pk")
+    historial = tarea.devoluciones.select_related("autor", "alumno", "proyecto", "tarea").order_by("fecha_creacion", "pk")
     if _rol(request.user) == "profesor" and not request.user.is_superuser:
         historial = historial.filter(autor=request.user)
     return JsonResponse({
@@ -644,7 +647,8 @@ def api_evaluaciones(request, pk):
             _serializar_evaluacion(item, request.user)
             for item in historial
             if _rol(request.user) != "alumno" or (
-                item.anulada_en is None and (item.tipo == "grupal" or (item.tipo == "individual" and item.alumno_id == request.user.pk))
+                item.tipo in {"historica", "grupal"}
+                or (item.tipo == "individual" and item.alumno_id == request.user.pk)
             )
         ],
     })

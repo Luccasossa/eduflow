@@ -436,10 +436,13 @@ class TablerosTests(TestCase):
         student_project = self.client.get(reverse("api_proyecto", args=[proyecto.pk])).json()["proyecto"]
         self.assertCountEqual(
             [entry["id"] for entry in student_project["devoluciones"]],
-            [first_feedback_id, second_feedback_id, first_group.json()["evaluacion"]["id"]],
+            [first_feedback_id, second_feedback_id, first_group.json()["evaluacion"]["id"], second_group_id],
         )
         student_history = self.client.get(task_evaluations_url).json()["historial"]
-        self.assertEqual([entry["id"] for entry in student_history], [first_group.json()["evaluacion"]["id"]])
+        self.assertCountEqual(
+            [entry["id"] for entry in student_history],
+            [first_group.json()["evaluacion"]["id"], second_group_id],
+        )
 
     def test_calificaciones_de_tarea_compartida_se_mantienen_independientes_por_docente(self):
         from proyectos.models import DevolucionDocente
@@ -515,6 +518,96 @@ class TablerosTests(TestCase):
         self.assertEqual(str(tarea.calificacion), "9.00")
         self.assertEqual(tarea.evaluado_por_id, self.profesor.pk)
 
+    def test_alumno_ve_todas_las_devoluciones_de_sus_docentes_y_no_las_de_otro_alumno(self):
+        from proyectos.models import DevolucionDocente
+
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor, self.otro_profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Informe de dos docentes")
+        task_url = reverse("api_tarea", args=[tarea.pk])
+        task_history_url = reverse("api_evaluaciones", args=[tarea.pk])
+        project_url = reverse("api_proyecto", args=[proyecto.pk])
+
+        self.client.force_login(self.profesor)
+        first = self.client.patch(
+            reverse("api_calificar_tarea", args=[tarea.pk]),
+            data=json.dumps({"calificacion": "8.00", "retroalimentacion": "Aporte claro."}),
+            content_type="application/json",
+        )
+        self.assertEqual(first.status_code, 200, first.content)
+        first_id = first.json()["tarea"]["devoluciones"][0]["id"]
+        self.client.force_login(self.otro_profesor)
+        second = self.client.patch(
+            reverse("api_calificar_tarea", args=[tarea.pk]),
+            data=json.dumps({"calificacion": "9.00", "retroalimentacion": "Buen análisis."}),
+            content_type="application/json",
+        )
+        self.assertEqual(second.status_code, 200, second.content)
+        second_id = second.json()["tarea"]["devoluciones"][0]["id"]
+
+        self.client.force_login(self.profesor)
+        replacement = self.client.patch(
+            reverse("api_devolucion", args=[first_id]),
+            data=json.dumps({"calificacion": "8.50", "comentario": "Aporte claro y bien fundamentado."}),
+            content_type="application/json",
+        )
+        self.assertEqual(replacement.status_code, 201, replacement.content)
+        replacement_id = replacement.json()["devolucion"]["id"]
+
+        self.client.force_login(self.alumno)
+        task_feedback = self.client.get(task_url).json()["tarea"]["devoluciones"]
+        self.assertCountEqual([entry["id"] for entry in task_feedback], [first_id, second_id, replacement_id])
+        by_id = {entry["id"]: entry for entry in task_feedback}
+        for entry_id, expected_author, expected_comment in (
+            (first_id, "Usuario 40100004", "Aporte claro."),
+            (second_id, "Usuario 40100005", "Buen análisis."),
+            (replacement_id, "Usuario 40100004", "Aporte claro y bien fundamentado."),
+        ):
+            self.assertEqual(by_id[entry_id]["autor"], expected_author)
+            self.assertEqual(by_id[entry_id]["comentario"], expected_comment)
+            self.assertEqual(by_id[entry_id]["tarea"], tarea.titulo)
+            self.assertEqual(by_id[entry_id]["proyecto_id"], proyecto.pk)
+            self.assertTrue(by_id[entry_id]["fecha"])
+        self.assertTrue(by_id[first_id]["anulada"])
+        task_history = self.client.get(task_history_url).json()["historial"]
+        self.assertCountEqual([entry["id"] for entry in task_history], [first_id, second_id, replacement_id])
+
+        project_data = self.client.get(project_url).json()["proyecto"]
+        project_feedback = project_data["devoluciones"]
+        self.assertCountEqual([entry["id"] for entry in project_feedback], [first_id, second_id, replacement_id])
+        self.assertEqual({entry["autor"] for entry in project_feedback}, {"Usuario 40100004", "Usuario 40100005"})
+        self.assertCountEqual(
+            [entry["id"] for entry in project_data["tareas"][0]["devoluciones"]],
+            [first_id, second_id, replacement_id],
+        )
+
+        self.assertEqual(self.client.get(reverse("core:api_notificaciones")).json()["no_leidas"], 2)
+        self.client.force_login(self.ajeno)
+        self.assertEqual(self.client.get(reverse("core:api_notificaciones")).json()["no_leidas"], 0)
+
+        self.client.force_login(self.otro_profesor)
+        self.assertEqual(
+            [entry["id"] for entry in self.client.get(task_url).json()["tarea"]["devoluciones"]],
+            [second_id],
+        )
+        self.assertEqual(
+            [entry["id"] for entry in self.client.get(project_url).json()["proyecto"]["devoluciones"]],
+            [second_id],
+        )
+
+        individual_url = reverse("api_evaluacion_individual", args=[tarea.pk, self.companero.pk])
+        individual = self.json_post(individual_url, {"calificacion": "7.00", "comentario": "Evaluación individual."})
+        self.assertEqual(individual.status_code, 201, individual.content)
+        companion_entry_id = individual.json()["evaluacion"]["id"]
+        self.client.force_login(self.alumno)
+        self.assertNotIn(companion_entry_id, [entry["id"] for entry in self.client.get(task_url).json()["tarea"]["devoluciones"]])
+        self.assertNotIn(companion_entry_id, [entry["id"] for entry in self.client.get(task_history_url).json()["historial"]])
+        self.assertNotIn(companion_entry_id, [entry["id"] for entry in self.client.get(project_url).json()["proyecto"]["devoluciones"]])
+        self.client.force_login(self.companero)
+        self.assertIn(companion_entry_id, [entry["id"] for entry in self.client.get(project_url).json()["proyecto"]["devoluciones"]])
+
+        self.assertEqual(DevolucionDocente.objects.filter(pk__in=[first_id, second_id, replacement_id, companion_entry_id]).count(), 4)
+
     def test_devolucion_general_proyecto_se_edita_y_elimina_sin_mezclar_tareas(self):
         from proyectos.models import DevolucionDocente
         proyecto = self.crear_proyecto()
@@ -538,7 +631,8 @@ class TablerosTests(TestCase):
 
         self.client.force_login(self.alumno)
         entries = self.client.get(reverse("api_proyecto", args=[proyecto.pk])).json()["proyecto"]["devoluciones"]
-        self.assertEqual([entry["id"] for entry in entries], [current_id])
+        self.assertCountEqual([entry["id"] for entry in entries], [original_id, current_id])
+        self.assertTrue(next(entry for entry in entries if entry["id"] == original_id)["anulada"])
         self.assertEqual(self.client.delete(reverse("api_devolucion", args=[current_id])).status_code, 404)
         self.client.force_login(self.profesor)
         self.assertEqual(self.client.delete(reverse("api_devolucion", args=[current_id])).status_code, 200)

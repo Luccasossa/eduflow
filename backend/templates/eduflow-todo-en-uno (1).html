@@ -2295,7 +2295,7 @@ nav {
                 evaluationLabel += entry.anulada ? ' · ANULADA' : ' · VIGENTE';
             }
             item.appendChild(el('strong', null, evaluationLabel));
-            item.appendChild(el('strong', null, entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+            item.appendChild(el('strong', null, (entry.anulada ? 'Versión anterior · ' : '') + entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
             if (entry.anulada) {
                 var cancellation = 'Anulada ' + (entry.anulada_en ? formatDate(entry.anulada_en.slice(0, 10)) : '');
                 if (entry.anulada_por) cancellation += ' por ' + entry.anulada_por;
@@ -2449,9 +2449,8 @@ nav {
                     var history = el('div', 'project-feedback-history');
                     history.appendChild(el('strong', null, 'Historial de devoluciones de la tarea'));
                     t.feedbackHistory.forEach(function (entry) {
-                        if (entry.anulada) return;
                         var feedback = el('article', 'project-feedback-entry');
-                        feedback.appendChild(el('strong', null, entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+                        feedback.appendChild(el('strong', null, (entry.anulada ? 'Versión anterior · ' : '') + entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
                         if (entry.comentario) feedback.appendChild(el('p', null, entry.comentario));
                         if (entry.calificacion !== '') feedback.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
                         history.appendChild(feedback);
@@ -2574,7 +2573,7 @@ nav {
         }
         task.feedbackHistory.forEach(function (entry) {
             var item = el('article', 'project-feedback-entry');
-            item.appendChild(el('strong', null, (entry.tipo === 'individual' ? 'Individual · ' + entry.alumno : 'Grupal') + ' · ' + entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+            item.appendChild(el('strong', null, (entry.anulada ? 'Versión anterior · ' : '') + (entry.tipo === 'individual' ? 'Individual · ' + entry.alumno : 'Grupal') + ' · ' + entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
             if (entry.anulada) item.appendChild(el('p', 'muted', 'Versión anterior o devolución eliminada.'));
             if (entry.comentario) item.appendChild(el('p', null, entry.comentario));
             if (entry.calificacion !== '') item.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
@@ -2615,9 +2614,9 @@ nav {
             link.href = delivery.descarga; box.appendChild(link);
         });
         box.appendChild(el('h3', null, 'Devoluciones y calificaciones'));
-        (task.feedbackHistory || []).filter(function (entry) { return !entry.anulada; }).forEach(function (entry) {
+        (task.feedbackHistory || []).forEach(function (entry) {
             var row = el('article', 'project-feedback-entry');
-            row.appendChild(el('strong', null, entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
+            row.appendChild(el('strong', null, (entry.anulada ? 'Versión anterior · ' : '') + entry.autor + ' · ' + formatDate(entry.fecha.slice(0, 10))));
             if (entry.comentario) row.appendChild(el('p', null, entry.comentario));
             if (entry.calificacion !== '') row.appendChild(el('p', null, 'Calificación: ' + entry.calificacion + '/' + document.body.dataset.gradeMax));
             box.appendChild(row);

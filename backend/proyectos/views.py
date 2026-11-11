@@ -61,7 +61,7 @@ def _devoluciones_tarea_visibles(tarea, usuario):
     if usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
         entries = entries.filter(autor=usuario)
     elif usuario and _rol(usuario) == "alumno":
-        entries = entries.filter(anulada_en__isnull=True).filter(
+        entries = entries.filter(
             Q(tipo="historica", tarea=tarea) | Q(tipo="grupal")
             | Q(tipo="individual", alumno=usuario)
         )
@@ -142,9 +142,9 @@ def _devoluciones_visibles(proyecto, usuario):
     ).all()
     if usuario and _rol(usuario) == "alumno":
         entries = entries.filter(
-            Q(tipo="historica", tarea__isnull=True, anulada_en__isnull=True)
-            | Q(tipo="grupal", anulada_en__isnull=True)
-            | Q(tipo="individual", alumno=usuario, anulada_en__isnull=True)
+            Q(tipo="historica")
+            | Q(tipo="grupal")
+            | Q(tipo="individual", alumno=usuario)
         )
     elif usuario and _rol(usuario) == "profesor" and not usuario.is_superuser:
         entries = entries.filter(autor=usuario)
