@@ -213,6 +213,42 @@ def api_tareas(request):
 
 
 @login_required
+@require_http_methods(["DELETE"])
+def api_eliminar_todas_tareas(request):
+    """Remove only the signed-in student's personal tasks, never project or assigned tasks."""
+    if _rol(request.user) != "alumno":
+        return JsonResponse({"error": "Solo los alumnos pueden eliminar sus tareas personales."}, status=403)
+
+    removed_submission_paths = []
+    deleted = 0
+    with transaction.atomic():
+        # Lock rows after opening the transaction to prevent concurrent edits/deletes.
+        owned_tasks = list(
+            Tarea.objects.select_for_update()
+            .filter(creador=request.user, proyecto__isnull=True)
+            .exclude(asignaciones__isnull=False)
+            .distinct()
+        )
+        for task in owned_tasks:
+            submissions = list(Entrega.objects.filter(tarea=task).only("pk", "archivo"))
+            removed_submission_paths.extend((submission.archivo.storage, submission.archivo.name) for submission in submissions if submission.archivo.name)
+            # Submission retries use a protected self-reference; remove newest attempts first.
+            remaining = len(submissions)
+            while remaining:
+                leaves = list(Entrega.objects.filter(tarea=task, siguiente_entrega__isnull=True).values_list("pk", flat=True))
+                if not leaves:
+                    raise ValidationError("No se pudo eliminar el historial de entregas de una tarea.")
+                Entrega.objects.filter(pk__in=leaves).delete()
+                remaining -= len(leaves)
+            task.delete()
+            deleted += 1
+
+    for storage, path in removed_submission_paths:
+        storage.delete(path)
+    return JsonResponse({"eliminadas": deleted})
+
+
+@login_required
 @require_http_methods(["GET", "POST"])
 def api_asignaciones(request):
     """Teacher task assignments and deliveries; project tasks stay in project review."""

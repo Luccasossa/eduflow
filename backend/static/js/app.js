@@ -908,10 +908,15 @@
             content.replaceChildren(body);
         } catch (error) { content.replaceChildren(make("p", "form-error", error.message)); }
     }
-    function showProjectDetail(project) {
+    async function showProjectDetail(project) {
         const dialog = $("#detailModal"), content = $("#detailContent"), body = make("div", "detail-view");
+        if (!dialog || !content) { notify("No se pudo abrir el detalle del proyecto.", true); return; }
         $("#detailTitle").textContent = "Proyecto · " + project.nombre;
-        body.append(make("h3", "", "Descripción"), make("p", "", project.descripcion || "Sin descripción."), make("p", "", `Fecha de entrega: ${dateLabel(project.fecha_entrega)} · Progreso: ${project.progreso}%`));
+        const progress = make("div", "project-detail-progress");
+        progress.setAttribute("role", "progressbar"); progress.setAttribute("aria-valuemin", "0"); progress.setAttribute("aria-valuemax", "100"); progress.setAttribute("aria-valuenow", String(project.progreso || 0));
+        progress.appendChild(make("span", "", `${project.progreso || 0}% completado`));
+        body.append(make("h3", "", "Descripción"), make("p", "", project.descripcion || "Sin descripción."), make("p", "", `Fecha de entrega: ${dateLabel(project.fecha_entrega)}`), progress);
+        body.append(make("h3", "", "Integrantes"), make("p", "", (project.integrantes || []).map((member) => member.nombre).join(", ") || "Sin integrantes registrados."));
         body.appendChild(make("h3", "", "Tareas del proyecto"));
         if (!project.tareas.length) body.appendChild(make("p", "empty-state", "Este proyecto todavía no tiene tareas."));
         project.tareas.forEach((task) => {
@@ -924,7 +929,23 @@
         body.appendChild(make("h3", "", "Archivos generales del proyecto"));
         if (project.archivos_adjuntos?.length) project.archivos_adjuntos.forEach((file) => { const link = make("a", "text-button", file.nombre); link.href = file.abrir; link.target = "_blank"; link.rel = "noopener noreferrer"; body.appendChild(link); });
         else body.appendChild(make("p", "empty-state", "No hay archivos generales."));
-        content.replaceChildren(body); dialog.showModal();
+        body.appendChild(make("h3", "", "Documentos relacionados"));
+        content.replaceChildren(body);
+        dialog.showModal();
+        try {
+            const result = await api("/documentos/api/?proyecto=" + encodeURIComponent(project.id));
+            if (!dialog.open || Number(project.id) !== Number(projects.find((item) => item.id === project.id)?.id)) return;
+            const documents = result.documentos || [];
+            if (!documents.length) body.appendChild(make("p", "empty-state", "No hay documentos relacionados."));
+            documents.forEach((document) => {
+                const row = make("article", "project-feedback-entry");
+                row.append(make("strong", "", document.titulo), make("p", "", `Actualizado: ${dateLabel(document.fecha_actualizacion?.slice(0, 10))} · Revisión: ${document.estado_revision || "Sin estado"}`));
+                if (document.retroalimentacion) row.appendChild(make("p", "", `Devolución: ${document.retroalimentacion}`));
+                const open = make("button", "text-button", "Abrir documento"); open.type = "button"; open.addEventListener("click", () => openDocument(document, project.id, !document.puede_editar)); row.appendChild(open); body.appendChild(row);
+            });
+        } catch (error) {
+            body.appendChild(make("p", "form-error", "No se pudieron cargar los documentos: " + error.message));
+        }
     }
     function setProjectModalBusy(busy) {
         ["#projectNameInput", "#projectDescriptionInput", "#projectDueDateInput", "#projectMembersInput", "#saveProjectBtn", "#deleteProjectBtn"]
@@ -1117,6 +1138,20 @@
         } catch (error) { notify(error.message, true); }
     }
 
+    async function deleteAllTasks() {
+        const ownedCount = allPersonalTasks.filter((task) => !task.proyecto_id && task.puede_editar).length;
+        if (!ownedCount) { notify("No hay tareas personales para eliminar."); return; }
+        if (!window.confirm(`Se eliminarán tus ${ownedCount} tareas personales y sus entregas asociadas. Las tareas de proyectos y las asignadas por docentes se conservarán. ¿Continuar?`)) return;
+        const button = $("#deleteAllTasksBtn");
+        if (button) { button.disabled = true; button.textContent = "Eliminando…"; }
+        try {
+            const result = await api(taskUrl + "eliminar-todas/", "DELETE", {});
+            await loadTasks();
+            notify(`Se eliminaron ${result.eliminadas} tareas personales.`);
+        } catch (error) { notify(error.message, true); }
+        finally { if (button) { button.disabled = false; button.textContent = "Eliminar todas las tareas"; } }
+    }
+
     function renderProjects() {
         const list = $("#studentProjectList");
         if (!list) return;
@@ -1139,12 +1174,12 @@
 
             card.appendChild(make("span", "project-work-type", project.integrantes.length > 1 ? "Trabajo grupal" : "Trabajo individual"));
             const actions = make("div", "project-actions");
-            const viewProject = make("button", "secondary-button", "Ver proyecto"); viewProject.type = "button"; viewProject.addEventListener("click", () => showProjectDetail(project)); actions.appendChild(viewProject);
-            const addTask = make("button", "secondary-button", "Tareas");
+            const viewProject = make("button", "secondary-button", "⌕ Ver proyecto"); viewProject.type = "button"; viewProject.addEventListener("click", () => showProjectDetail(project)); actions.appendChild(viewProject);
+            const addTask = make("button", "secondary-button project-action-tasks", "✓ Tareas");
             addTask.type = "button";
             addTask.addEventListener("click", () => openProjectTaskBoard(project));
             actions.appendChild(addTask);
-            const documents = make("button", "secondary-button", "Documento");
+            const documents = make("button", "secondary-button project-action-documents", "▤ Documentos");
             documents.type = "button";
             documents.addEventListener("click", () => openProjectResources(project));
             actions.appendChild(documents);
@@ -1436,6 +1471,11 @@
 
     $("#closeProjectTaskBoard")?.addEventListener("click", () => $("#projectTaskBoardModal")?.close());
     $("#closeDetailModal")?.addEventListener("click", () => $("#detailModal")?.close());
+    $("#deleteAllTasksBtn")?.addEventListener("click", deleteAllTasks);
+    $$('[data-close-detail]').forEach((button) => button.addEventListener("click", () => $("#detailModal")?.close()));
+    ["#profileModal", "#detailModal", "#projectTaskBoardModal", "#projectDocumentsModal"].forEach((selector) => {
+        $(selector)?.addEventListener("click", (event) => { if (event.target === event.currentTarget) event.currentTarget.close(); });
+    });
     $("#backFromProjectTasks")?.addEventListener("click", () => $("#projectTaskBoardModal")?.close());
     $("#projectTaskBoardModal")?.addEventListener("close", () => {
         if (returningFromProjectTaskBoard) {

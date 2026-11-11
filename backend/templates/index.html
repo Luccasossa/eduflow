@@ -290,9 +290,14 @@
                     <h2>Mis tareas</h2>
                 </div>
 
+                <div class="section-actions">
+                <button class="danger-button" id="deleteAllTasksBtn" type="button">
+                    Eliminar todas las tareas
+                </button>
                 <button class="primary-button" data-new-task>
                     + Nueva tarea
                 </button>
+                </div>
 
             </div>
 
@@ -429,6 +434,11 @@
             </form>
             <div class="modal-actions"><button type="button" class="secondary-button" data-close-profile>Cerrar</button></div>
         </div>
+    </dialog>
+    <dialog class="modal project-detail-modal" id="detailModal" aria-labelledby="detailTitle">
+        <div class="modal-header"><h2 id="detailTitle">Detalle del proyecto</h2><button type="button" class="close-modal" id="closeDetailModal" aria-label="Cerrar">×</button></div>
+        <div id="detailContent" aria-live="polite"></div>
+        <div class="modal-actions"><button type="button" class="secondary-button" data-close-detail>Cerrar</button></div>
     </dialog>
     <dialog class="modal project-task-board-modal" id="projectTaskBoardModal" aria-labelledby="projectTaskBoardTitle">
         <div class="modal-header"><h2 id="projectTaskBoardTitle">Tareas del proyecto</h2><button type="button" class="close-modal" id="closeProjectTaskBoard" aria-label="Cerrar">×</button></div>

@@ -138,6 +138,35 @@ class TablerosTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertFalse(Tarea.objects.filter(pk=tarea.pk).exists())
 
+    def test_elimina_todas_tareas_personales_sin_tocar_proyectos_ni_asignaciones(self):
+        propias = [Tarea.objects.create(creador=self.alumno, titulo=f"Personal {index}") for index in range(2)]
+        entrega = Entrega.objects.create(
+            tarea=propias[0], alumno=self.alumno,
+            archivo=SimpleUploadedFile("trabajo.pdf", b"%PDF-1.4 contenido", content_type="application/pdf"),
+        )
+        storage, stored_path = entrega.archivo.storage, entrega.archivo.name
+        self.assertTrue(storage.exists(stored_path))
+        proyecto = self.crear_proyecto()
+        tarea_proyecto = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Del proyecto")
+        asignada = Tarea.objects.create(creador=self.profesor, titulo="Asignada")
+        AsignacionTarea.objects.create(tarea=asignada, alumno=self.alumno, profesor=self.profesor)
+        self.client.force_login(self.alumno)
+
+        response = self.client.delete(reverse("api_eliminar_todas_tareas"))
+
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(response.json()["eliminadas"], 2)
+        self.assertFalse(Tarea.objects.filter(pk__in=[task.pk for task in propias]).exists())
+        self.assertFalse(Entrega.objects.filter(pk=entrega.pk).exists())
+        self.assertFalse(storage.exists(stored_path))
+        self.assertTrue(Tarea.objects.filter(pk=tarea_proyecto.pk).exists())
+        self.assertTrue(Tarea.objects.filter(pk=asignada.pk).exists())
+
+    def test_solo_alumno_puede_eliminar_todas_sus_tareas(self):
+        self.client.force_login(self.profesor)
+        response = self.client.delete(reverse("api_eliminar_todas_tareas"))
+        self.assertEqual(response.status_code, 403)
+
     def test_un_alumno_no_puede_consultar_ni_modificar_tarea_ajena(self):
         tarea = Tarea.objects.create(creador=self.alumno, titulo="Privada")
         self.client.force_login(self.ajeno)

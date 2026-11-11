@@ -5,6 +5,7 @@ from . import views
 urlpatterns = [
     path('', views.lista_tareas, name='lista_tareas'),
     path('api/', views.api_tareas, name='api_tareas'),
+    path('api/eliminar-todas/', views.api_eliminar_todas_tareas, name='api_eliminar_todas_tareas'),
     path('api/asignaciones/', views.api_asignaciones, name='api_asignaciones'),
     path('api/alumnos-asignables/', views.api_alumnos_asignables, name='api_alumnos_asignables'),
     path('api/<int:pk>/', views.api_tarea, name='api_tarea'),
