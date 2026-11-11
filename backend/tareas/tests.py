@@ -284,14 +284,108 @@ class TablerosTests(TestCase):
         self.client.force_login(self.ajeno)
         self.assertEqual(self.client.get(reverse("api_proyecto", args=[proyecto.id])).status_code, 404)
 
-    def test_creador_no_puede_eliminar_proyecto_con_tareas_y_se_preserva_el_historial(self):
+    def test_alumno_elimina_proyecto_sin_revision_y_no_puede_eliminar_proyecto_ajeno(self):
         proyecto = self.crear_proyecto()
         tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Tarea asociada")
+        otro_proyecto = Proyecto.objects.create(nombre="Proyecto ajeno", creador=self.ajeno)
         self.client.force_login(self.alumno)
         response = self.client.delete(reverse("api_proyecto", args=[proyecto.id]))
-        self.assertEqual(response.status_code, 409)
-        self.assertTrue(Proyecto.objects.filter(pk=proyecto.pk).exists())
-        self.assertTrue(Tarea.objects.filter(pk=tarea.pk, proyecto=proyecto).exists())
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertFalse(Proyecto.objects.filter(pk=proyecto.pk).exists())
+        self.assertFalse(Tarea.objects.filter(pk=tarea.pk).exists())
+        self.assertEqual(self.client.delete(reverse("api_proyecto", args=[otro_proyecto.pk])).status_code, 404)
+        self.assertTrue(Proyecto.objects.filter(pk=otro_proyecto.pk).exists())
+
+    def test_alumno_elimina_proyecto_calificado_con_historial_entregas_y_archivos_compartidos(self):
+        from archivos.models import Archivo
+        from documentos.models import Documento
+        from proyectos.models import DevolucionDocente
+
+        proyecto = self.crear_proyecto()
+        proyecto.profesores.add(self.profesor)
+        tarea = Tarea.objects.create(creador=self.alumno, proyecto=proyecto, titulo="Proyecto evaluado")
+        documento = Documento.objects.create(
+            titulo="Informe revisado", creador=self.alumno, proyecto=proyecto,
+            calificacion="8.50", retroalimentacion="Buen análisis.", evaluado_por=self.profesor,
+        )
+        original_feedback = DevolucionDocente.objects.create(
+            proyecto=proyecto, tarea=tarea, autor=self.profesor, tipo="grupal",
+            comentario="Primera devolución", calificacion="7.50",
+        )
+        original_feedback.anulada_en = timezone.now()
+        original_feedback.anulada_por = self.profesor
+        original_feedback.save(update_fields=("anulada_en", "anulada_por"))
+        replacement_feedback = DevolucionDocente.objects.create(
+            proyecto=proyecto, tarea=tarea, autor=self.profesor, tipo="grupal",
+            comentario="Devolución final", calificacion="9.00", reemplaza=original_feedback,
+        )
+        document_feedback = DevolucionDocente.objects.create(
+            proyecto=proyecto, documento=documento, autor=self.profesor,
+            comentario="Documento corregido", calificacion="8.50",
+        )
+
+        archive_storage = Archivo._meta.get_field("archivo").storage
+        previous_archive_location = archive_storage.location
+        archive_storage.location = self._media.name
+        self.addCleanup(setattr, archive_storage, "location", previous_archive_location)
+        shared_file = Archivo.objects.create(
+            propietario=self.alumno,
+            archivo=SimpleUploadedFile("fuente.pdf", b"%PDF-1.4 archivo compartido"),
+            nombre_original="fuente.pdf", tipo="application/pdf",
+            proyecto=proyecto, tarea=tarea,
+        )
+        self.addCleanup(shared_file.archivo.storage.delete, shared_file.archivo.name)
+        proyecto.archivos_adjuntos.add(shared_file)
+        tarea.archivos_adjuntos.add(shared_file)
+        otro_proyecto = Proyecto.objects.create(nombre="Proyecto preservado", creador=self.ajeno)
+        otra_tarea = Tarea.objects.create(creador=self.ajeno, proyecto=otro_proyecto, titulo="Tarea preservada")
+        otro_proyecto.archivos_adjuntos.add(shared_file)
+
+        student_client = Client()
+        student_client.force_login(self.alumno)
+        first_delivery_response = student_client.post(
+            reverse("api_entregas", args=[tarea.pk]),
+            {"archivo": SimpleUploadedFile("entrega-inicial.pdf", b"%PDF-1.7 entrega inicial"), "observaciones": "Entrega original"},
+        )
+        self.assertEqual(first_delivery_response.status_code, 201, first_delivery_response.content)
+        first_delivery = Entrega.objects.get(pk=first_delivery_response.json()["entrega"]["id"])
+        first_delivery.estado = "rechazada"
+        first_delivery.devolucion = "Corregir la conclusión"
+        first_delivery.save(update_fields=("estado", "devolucion"))
+        retry_response = student_client.post(
+            reverse("api_entregas", args=[tarea.pk]),
+            {"archivo": SimpleUploadedFile("entrega-final.pdf", b"%PDF-1.7 entrega final")},
+        )
+        self.assertEqual(retry_response.status_code, 201, retry_response.content)
+        retry = Entrega.objects.get(pk=retry_response.json()["entrega"]["id"])
+        delivery_paths = [first_delivery.archivo.name, retry.archivo.name]
+
+        teacher_client = Client()
+        teacher_client.force_login(self.profesor)
+        self.assertEqual(
+            [row["id"] for row in teacher_client.get(reverse("api_proyectos")).json()["proyectos"]],
+            [proyecto.pk],
+        )
+        self.client.force_login(self.alumno)
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.delete(reverse("api_proyecto", args=[proyecto.pk]))
+        self.assertEqual(response.status_code, 200, response.content)
+
+        self.assertFalse(Proyecto.objects.filter(pk=proyecto.pk).exists())
+        self.assertFalse(Tarea.objects.filter(pk=tarea.pk).exists())
+        self.assertFalse(Entrega.objects.filter(pk__in=[first_delivery.pk, retry.pk]).exists())
+        self.assertFalse(Documento.objects.filter(pk=documento.pk).exists())
+        self.assertFalse(DevolucionDocente.objects.filter(
+            pk__in=[original_feedback.pk, replacement_feedback.pk, document_feedback.pk],
+        ).exists())
+        self.assertTrue(all(not first_delivery.archivo.storage.exists(path) for path in delivery_paths))
+        self.assertTrue(Archivo.objects.filter(pk=shared_file.pk).exists())
+        self.assertTrue(shared_file.archivo.storage.exists(shared_file.archivo.name))
+        self.assertTrue(Proyecto.objects.filter(pk=otro_proyecto.pk).exists())
+        self.assertTrue(Tarea.objects.filter(pk=otra_tarea.pk, proyecto=otro_proyecto).exists())
+        self.assertTrue(otro_proyecto.archivos_adjuntos.filter(pk=shared_file.pk).exists())
+        self.assertEqual(teacher_client.get(reverse("api_proyectos")).json()["proyectos"], [])
+        self.assertEqual(student_client.get(reverse("api_proyectos")).json()["proyectos"], [])
 
     def test_integrante_colabora_en_tareas_y_progreso_se_persiste(self):
         proyecto = self.crear_proyecto()

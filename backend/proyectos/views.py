@@ -240,6 +240,64 @@ def api_proyectos(request):
     return JsonResponse({"proyecto": _serializar_proyecto(proyecto, request.user)}, status=201)
 
 
+def _delete_unreferenced_delivery_file(storage, path):
+    """Remove a submission file only if no surviving database row uses it."""
+    from archivos.models import Archivo
+    from tareas.models import Entrega
+
+    if Entrega.objects.filter(archivo=path).exists() or Archivo.objects.filter(archivo=path).exists():
+        return
+    storage.delete(path)
+
+
+def _eliminar_proyecto_alumno(usuario, proyecto_id):
+    from documentos.models import Documento
+    from tareas.models import Entrega, Tarea
+
+    with transaction.atomic():
+        proyecto = get_object_or_404(
+            Proyecto.objects.select_for_update(), pk=proyecto_id, creador=usuario,
+        )
+        tareas = list(Tarea.objects.select_for_update().filter(proyecto=proyecto))
+        task_ids = [task.pk for task in tareas]
+        document_ids = list(Documento.objects.select_for_update().filter(
+            proyecto=proyecto,
+        ).values_list("pk", flat=True))
+
+        from core.models import Actividad
+        Actividad.objects.filter(Q(proyecto=proyecto) | Q(tarea_id__in=task_ids)).delete()
+
+        # Feedback rows belong to this project and protect it, its tasks, and
+        # its documents. Remove them before deleting those parent records.
+        DevolucionDocente.objects.filter(proyecto=proyecto).delete()
+        Documento.objects.filter(pk__in=document_ids).delete()
+
+        deliveries = list(Entrega.objects.select_for_update().filter(
+            tarea_id__in=task_ids,
+        ).only("pk", "archivo"))
+        for delivery in deliveries:
+            if delivery.archivo.name:
+                storage, path = delivery.archivo.storage, delivery.archivo.name
+                transaction.on_commit(
+                    lambda storage=storage, path=path: _delete_unreferenced_delivery_file(storage, path)
+                )
+
+        # Retry deliveries protect their predecessor. Delete their leaves first.
+        remaining = len(deliveries)
+        while remaining:
+            leaves = list(Entrega.objects.filter(
+                tarea_id__in=task_ids,
+                siguiente_entrega__isnull=True,
+            ).values_list("pk", flat=True))
+            if not leaves:
+                raise ProtectedError("Un proyecto contiene una cadena de entregas protegida.", deliveries)
+            Entrega.objects.filter(pk__in=leaves).delete()
+            remaining -= len(leaves)
+
+        Tarea.objects.filter(pk__in=task_ids).delete()
+        proyecto.delete()
+
+
 @login_required
 @require_http_methods(["GET", "PATCH", "DELETE"])
 def api_proyecto(request, pk):
@@ -250,7 +308,7 @@ def api_proyecto(request, pk):
         return JsonResponse({"error": "Solo quien creó el proyecto puede modificarlo."}, status=403)
     if request.method == "DELETE":
         try:
-            proyecto.delete()
+            _eliminar_proyecto_alumno(request.user, pk)
         except ProtectedError:
             return JsonResponse({"error": "No se puede eliminar un proyecto que conserva registros académicos asociados."}, status=409)
         return JsonResponse({"eliminado": True})

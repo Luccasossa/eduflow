@@ -531,6 +531,16 @@
         </div>
     </div>
 
+    <dialog class="modal project-delete-dialog" id="projectDeleteConfirmDialog" aria-labelledby="projectDeleteConfirmTitle">
+        <h2 id="projectDeleteConfirmTitle">&iquest;Eliminar este proyecto?</h2>
+        <p>Este proyecto puede contener calificaciones, comentarios y devoluciones de profesores.</p>
+        <p>Si confirm&aacute;s la eliminaci&oacute;n, dejar&aacute; de estar disponible en tu espacio de trabajo.</p>
+        <form method="dialog" class="modal-actions">
+            <button type="submit" class="secondary-button" value="cancel">Cancelar</button>
+            <button type="submit" class="danger-button" value="delete">Eliminar proyecto</button>
+        </form>
+    </dialog>
+
     <div class="modal-overlay" id="documentModal" role="dialog" aria-modal="true" aria-labelledby="documentModalTitle">
         <div class="modal document-editor">
             <button type="button" class="close-modal" data-close-document aria-label="Cerrar">×</button>

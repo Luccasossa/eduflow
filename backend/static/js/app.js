@@ -1196,6 +1196,10 @@
                 edit.type = "button";
                 edit.addEventListener("click", () => openProject(project));
                 actions.appendChild(edit);
+                const removeProject = make("button", "text-button danger-text", "Eliminar proyecto");
+                removeProject.type = "button";
+                removeProject.addEventListener("click", () => deleteProject(project));
+                actions.appendChild(removeProject);
             }
             card.appendChild(actions);
 
@@ -1445,17 +1449,33 @@
         finally { projectSaveInFlight = false; setProjectModalBusy(false); }
     }
 
-    async function deleteProject() {
-        if (!editingProject || projectSaveInFlight || !window.confirm(`¿Eliminar “${editingProject.nombre}”? Solo se puede borrar si no tiene tareas, documentos ni devoluciones académicas asociadas.`)) return;
+
+    async function deleteProject(project = editingProject) {
+        if (!project || projectSaveInFlight) return;
+        const confirmDialog = $("#projectDeleteConfirmDialog");
+        if (!confirmDialog || confirmDialog.open) return;
+        confirmDialog.returnValue = "";
+        const confirmation = new Promise((resolve) => {
+            confirmDialog.addEventListener("close", () => resolve(confirmDialog.returnValue === "delete"), { once: true });
+        });
+        confirmDialog.showModal();
+        const confirmed = await confirmation;
+        if (!confirmed) return;
         projectSaveInFlight = true;
         setProjectModalBusy(true);
         try {
-            await api(`${projectUrl}${editingProject.id}/`, "DELETE", {});
-            closeProjectModal(true);
+            await api(projectUrl + project.id + "/", "DELETE", {});
+            if (editingProject?.id === project.id) closeProjectModal(true);
+            editingProject = null;
             await loadProjects();
             notify("Proyecto eliminado.");
-        } catch (error) { $("#projectFormError").textContent = error.message; }
-        finally { projectSaveInFlight = false; setProjectModalBusy(false); }
+        } catch (error) {
+            if (editingProject?.id === project.id) $("#projectFormError").textContent = error.message;
+            else notify(error.message, true);
+        } finally {
+            projectSaveInFlight = false;
+            setProjectModalBusy(false);
+        }
     }
 
     $$('[data-new-task]').forEach((button) => button.addEventListener("click", () => openTask()));
