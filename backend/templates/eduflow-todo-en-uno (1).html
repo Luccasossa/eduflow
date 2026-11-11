@@ -1651,6 +1651,7 @@ nav {
     var editingProjectFeedbackId = null;
     var teacherDocumentSession = 0;
     var teacherDocumentSaving = false;
+    var teacherDocumentReadOnly = false;
     var teacherDocumentLoading = false;
     var teacherConflictDocument = null;
     var projectLoadRequest = 0;
@@ -2036,11 +2037,17 @@ nav {
             teacherDocuments.forEach(function (doc) {
                 var card = el('article', 'document-card');
                 var title = el('strong', null, doc.titulo);
-                var meta = el('span', null, doc.proyecto || 'Documento institucional');
-                var open = el('button', 'text-button', doc.puede_editar ? 'Abrir y editar' : 'Ver');
-                open.type = 'button';
-                open.addEventListener('click', function () { openTeacherDocument(doc); });
-                card.append(title, meta, open);
+                var meta = el('span', null, (doc.proyecto || 'Documento institucional') + ' ? Actualizado ' + formatDate(doc.fecha_actualizacion.slice(0, 10)));
+                var view = el('button', 'text-button', 'Ver');
+                view.type = 'button';
+                view.addEventListener('click', function () { openTeacherDocument(doc, true); });
+                card.append(title, meta, view);
+                if (doc.puede_editar) {
+                    var edit = el('button', 'text-button', 'Editar');
+                    edit.type = 'button';
+                    edit.addEventListener('click', function () { openTeacherDocument(doc, false); });
+                    card.appendChild(edit);
+                }
                 if (doc.proyecto_id) card.appendChild(makeDocumentReviewControl(doc));
                 documentList.appendChild(card);
             });
@@ -2901,14 +2908,17 @@ nav {
         renderTeacherDocumentContent(doc ? doc.contenido : '');
         $('teacherDocProject').value = doc ? (doc.proyecto_id || '') : '';
         $('teacherDocProject').disabled = Boolean(doc);
-        $('teacherDocSave').disabled = teacherDocumentSaving || teacherDocumentLoading || Boolean(doc && !doc.puede_editar);
-        var canEdit = !teacherDocumentSaving && !teacherDocumentLoading && (!doc || doc.puede_editar);
+        $('teacherDocSave').hidden = teacherDocumentReadOnly;
+        $('teacherDocSave').disabled = teacherDocumentReadOnly || teacherDocumentSaving || teacherDocumentLoading || Boolean(doc && !doc.puede_editar);
+        $('teacherDocumentTitle').textContent = doc ? doc.titulo : 'Nuevo documento de c\u00e1tedra';
+        var canEdit = !teacherDocumentReadOnly && !teacherDocumentSaving && !teacherDocumentLoading && (!doc || doc.puede_editar);
         $('teacherDocContent').contentEditable = String(canEdit);
         document.querySelectorAll('.teacher-document-toolbar button, .teacher-document-toolbar select').forEach(function (control) { control.disabled = !canEdit; });
     }
 
-    function openTeacherDocument(doc) {
+    function openTeacherDocument(doc, readOnly) {
         var session = ++teacherDocumentSession;
+        teacherDocumentReadOnly = Boolean(readOnly);
         teacherDocumentLoading = Boolean(doc);
         teacherConflictDocument = null;
         $('teacherDocError').textContent = '';
@@ -2940,7 +2950,7 @@ nav {
         });
         $('teacherDocumentForm').addEventListener('submit', function (event) {
             event.preventDefault();
-            if (teacherDocumentSaving) return;
+            if (teacherDocumentSaving || teacherDocumentReadOnly) return;
             var session = teacherDocumentSession;
             var doc = state.editingDocument ? Object.assign({}, state.editingDocument) : null;
             var payload = { titulo: $('teacherDocName').value.trim(), contenido: serializeTeacherDocumentContent() };

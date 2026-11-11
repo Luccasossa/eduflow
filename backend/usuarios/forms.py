@@ -12,6 +12,12 @@ class RegistroUsuarioForm(forms.ModelForm):
         widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
     )
 
+    confirm_password = forms.CharField(
+        label="Confirmar contrase\u00f1a",
+        strip=False,
+        widget=forms.PasswordInput(attrs={"autocomplete": "new-password"}),
+    )
+
     class Meta:
         model = Usuario
         fields = ("first_name", "last_name", "email", "dni")
@@ -35,6 +41,14 @@ class RegistroUsuarioForm(forms.ModelForm):
         if Usuario.objects.filter(email__iexact=email).exists():
             raise ValidationError("Ya existe una cuenta registrada con ese correo.")
         return email
+
+    def clean(self):
+        cleaned = super().clean()
+        password = cleaned.get("password")
+        confirmation = cleaned.get("confirm_password")
+        if password and confirmation and password != confirmation:
+            self.add_error("confirm_password", "Las contrase\u00f1as no coinciden.")
+        return cleaned
 
     def clean_password(self):
         password = self.cleaned_data["password"]

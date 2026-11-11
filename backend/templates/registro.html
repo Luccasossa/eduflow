@@ -96,12 +96,19 @@
                     </label>
 
                     <label class="campo">
-                        <span>Contraseña</span>
-                        <input class="form-input" type="password"
-                               name="password"
-                               placeholder="Mínimo 8 caracteres"
-                               minlength="8" required>
+                        <span>Contrase&ntilde;a</span>
+                        <span class="password-field auth-password-field"><input class="form-input" type="password"
+                               name="password" autocomplete="new-password"
+                               placeholder="M&iacute;nimo 8 caracteres"
+                               minlength="8" required><button type="button" data-toggle-password aria-label="Mostrar contrase&ntilde;a" title="Mostrar contrase&ntilde;a">&#128065;</button></span>
                         {{ form.password.errors }}
+                    </label>
+                    <label class="campo">
+                        <span>Confirmar contrase&ntilde;a</span>
+                        <span class="password-field auth-password-field"><input class="form-input" type="password"
+                               name="confirm_password" autocomplete="new-password"
+                               minlength="8" required><button type="button" data-toggle-password aria-label="Mostrar contrase&ntilde;a" title="Mostrar contrase&ntilde;a">&#128065;</button></span>
+                        {{ form.confirm_password.errors }}
                     </label>
 
                     <button class="boton-registro" type="submit">
@@ -116,5 +123,26 @@
             </div>
         </main>
     </div>
+<script>
+document.querySelectorAll('[data-toggle-password]').forEach(function(button) {
+  button.addEventListener('click', function() {
+    var input = button.parentElement.querySelector('input');
+    input.type = input.type === 'password' ? 'text' : 'password';
+    var label = input.type === 'password' ? 'Mostrar contrase\u00f1a' : 'Ocultar contrase\u00f1a';
+    button.setAttribute('aria-label', label); button.title = label;
+  });
+});
+var registration = document.querySelector('form[action*="registro"]');
+if (registration) registration.addEventListener('submit', function(event) {
+  var password = registration.elements.password;
+  var confirmation = registration.elements.confirm_password;
+  if (password && confirmation && password.value !== confirmation.value) {
+    event.preventDefault(); confirmation.setCustomValidity('Las contrase\u00f1as no coinciden.');
+    confirmation.reportValidity();
+  }
+});
+var confirmationInput = document.querySelector('input[name="confirm_password"]');
+if (confirmationInput) confirmationInput.addEventListener('input', function() { confirmationInput.setCustomValidity(''); });
+</script>
 </body>
 </html>

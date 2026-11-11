@@ -326,3 +326,8 @@ input {
 .auth-messages { margin: 0 0 1rem; }
 .auth-message { padding: .75rem 1rem; border-radius: .5rem; color: #7f1d1d; background: #fee2e2; }
 .auth-message.success { color: #14532d; background: #dcfce7; }
+
+.auth-password-field { display:flex; align-items:stretch; gap:6px; width:100%; }
+.auth-password-field input { min-width:0; flex:1; }
+.auth-password-field button { border:1px solid #d8e0ea; border-radius:8px; padding:0 12px; background:#fff; color:#25364a; cursor:pointer; }
+.auth-password-field button:focus-visible { outline:2px solid #2563eb; outline-offset:2px; }

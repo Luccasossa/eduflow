@@ -16,6 +16,7 @@ class AutenticacionTests(TestCase):
             "email": "ana@example.com",
             "dni": "40123456",
             "password": "UnaClaveSegura_2026!",
+            "confirm_password": "UnaClaveSegura_2026!",
         }
         data.update(overrides)
         return data
@@ -38,6 +39,15 @@ class AutenticacionTests(TestCase):
         self.assertEqual(usuario.perfil.rol, "alumno")
         self.assertTrue(usuario.check_password("UnaClaveSegura_2026!"))
         self.assertNotEqual(usuario.password, "UnaClaveSegura_2026!")
+
+    def test_registro_rechaza_contrasenas_distintas_en_backend(self):
+        response = self.client.post(
+            reverse("usuarios:registro"),
+            self.registro_data(confirm_password="OtraClave_Fuerte_2026!"),
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Las contrase\u00f1as no coinciden")
+        self.assertFalse(Usuario.objects.filter(dni="40123456").exists())
 
     def test_dni_duplicado_muestra_error_y_no_crea_otra_cuenta(self):
         self.crear_usuario()

@@ -31,6 +31,7 @@
     let folders = [];
     let academicDocuments = [];
     let editingDocument = null;
+    let documentReadOnly = false;
     let documentConflictPending = false;
     let documentConflictVersion = null;
     let latestConflictDocument = null;
@@ -211,10 +212,16 @@
             card.appendChild(make("span", "document-review-state", documento.estado_revision ? `Revisión: ${documentReviewLabel(documento.estado_revision)}` : "Sin revisión docente"));
             if (documento.retroalimentacion) card.appendChild(make("p", "", `Devolución docente: ${documento.retroalimentacion}`));
             card.appendChild(make("span", "collaborators", documento.colaboradores.map((person) => person.nombre).join(", ")));
-            const open = make("button", "text-button", documento.puede_editar ? "Abrir y editar" : "Ver");
-            open.type = "button";
-            open.addEventListener("click", () => openDocument(documento));
-            card.appendChild(open);
+            const view = make("button", "text-button", "Ver");
+            view.type = "button";
+            view.addEventListener("click", () => openDocument(documento, null, true));
+            card.appendChild(view);
+            if (documento.puede_editar) {
+                const edit = make("button", "text-button", "Editar");
+                edit.type = "button";
+                edit.addEventListener("click", () => openDocument(documento, null, false));
+                card.appendChild(edit);
+            }
             list.appendChild(card);
         });
         renderRecentDocuments();
@@ -493,14 +500,14 @@
 
     function updateDocumentControls() {
         const lacksPermission = Boolean(editingDocument && !editingDocument.puede_editar);
-        const locked = documentLoading || documentSaveInFlight || documentLoadFailed || documentContentInvalid || lacksPermission;
+        const locked = documentReadOnly || documentLoading || documentSaveInFlight || documentLoadFailed || documentContentInvalid || lacksPermission;
         $("#documentContentInput").setAttribute("contenteditable", String(!locked));
         $("#documentTitleInput").readOnly = locked;
         $$(".document-toolbar button, .document-toolbar select").forEach((control) => { control.disabled = locked; });
         $("#documentProjectInput").disabled = Boolean(documentLoading || documentSaveInFlight || documentLoadFailed || editingDocument || contextualDocumentProjectId);
-        $("#saveDocumentBtn").hidden = Boolean(lacksPermission || documentLoadFailed);
+        $("#saveDocumentBtn").hidden = Boolean(documentReadOnly || lacksPermission || documentLoadFailed);
         $("#saveDocumentBtn").disabled = locked;
-        $("#deleteDocumentBtn").hidden = !editingDocument || !editingDocument.puede_eliminar;
+        $("#deleteDocumentBtn").hidden = documentReadOnly || !editingDocument || !editingDocument.puede_eliminar;
         $("#deleteDocumentBtn").disabled = Boolean(documentLoading || documentSaveInFlight || documentLoadFailed || !editingDocument?.puede_eliminar);
     }
 
@@ -508,6 +515,7 @@
         editingDocument = documento;
         $("#documentModalTitle").textContent = documento ? documento.titulo : "Nuevo documento";
         $("#documentTitleInput").value = documento?.titulo || "";
+        $("#documentTitleInput").readOnly = documentReadOnly;
         renderDocumentContent(documento?.contenido || "");
         documentEditRevision = 0;
         documentSelectionRange = null;
@@ -528,8 +536,9 @@
         }
     }
 
-    async function openDocument(documento = null, projectId = null) {
+    async function openDocument(documento = null, projectId = null, readOnly = false) {
         const session = ++documentSession;
+        documentReadOnly = Boolean(readOnly);
         contextualDocumentProjectId = projectId || null;
         projectResourcesReturnId = projectId || null;
         if (projectId && $("#projectDocumentsModal")?.open) $("#projectDocumentsModal").close();
