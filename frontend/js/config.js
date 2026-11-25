@@ -24,7 +24,7 @@ window.AVENIRSTACK_CONFIG = {
   /* ---------- Contacto ---------- */
   contact: {
     // Correo público de contacto. Ej.: "contacto@tudominio.com"
-    email: "",
+    email: "avenirstack@gmail.com",
 
     // Dirección que recibe el formulario (servicio de formularios o backend propio).
     // Vacío = el formulario valida, pero NO envía ni simula un envío.
@@ -52,27 +52,27 @@ window.AVENIRSTACK_CONFIG = {
      skills:      tecnologías y conocimientos */
   team: [
     {
-      name: "Lucca",
+      name: "Lucca Julian Sosa Alvarenga",
       area: "Desarrollo Full Stack",
       role: "",
       description: "",
-      photo: "",
+      photo: "/static/avenirstack/assets/Lucca.jpg",
       skills: ["Python", "Django", "MySQL", "HTML", "CSS", "JavaScript"]
     },
     {
-      name: "Carla",
+      name: "Carla Juliana Fernandez",
       area: "Desarrollo Full Stack",
       role: "",
       description: "",
-      photo: "",
+      photo: "/static/avenirstack/assets/Carla.jpeg",
       skills: ["Django", "MySQL", "HTML", "CSS", "JavaScript"]
     },
     {
-      name: "Aaron",
+      name: "Aaron Giezi Josias Suarez Luna",
       area: "Desarrollo de software",
       role: "",
       description: "",
-      photo: "",
+      photo: "/static/avenirstack/assets/Aaron.jpeg",
       skills: ["Django", "HTML", "CSS", "JavaScript"]
     }
   ]

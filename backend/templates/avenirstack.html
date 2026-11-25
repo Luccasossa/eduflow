@@ -273,47 +273,15 @@
         <div class="contact-copy" data-reveal>
           <div class="pill-row left"><p class="pill">Contacto</p></div>
           <h2 id="contacto-title">Contanos qué querés construir</h2>
-          <p class="section-lead">Completá el formulario con tu consulta y los datos para poder responderte.</p>
-          <ul class="info-list" id="contact-info"></ul>
+          <p class="section-lead">Escribinos a nuestro correo y conversemos sobre tu próxima idea.</p>
         </div>
 
-        <form class="card form" id="contact-form" novalidate data-reveal style="--d:.1s">
-          <div class="field">
-            <label for="f-name">Nombre completo <span aria-hidden="true">*</span></label>
-            <input class="input" id="f-name" name="name" type="text" autocomplete="name" required maxlength="120" aria-describedby="err-name">
-            <p class="error" id="err-name"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><span></span></p>
-          </div>
-          <div class="field">
-            <label for="f-email">Correo electrónico <span aria-hidden="true">*</span></label>
-            <input class="input" id="f-email" name="email" type="email" inputmode="email" autocomplete="email" required maxlength="160" aria-describedby="err-email">
-            <p class="error" id="err-email"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><span></span></p>
-          </div>
-          <div class="field">
-            <label for="f-subject">Asunto <span aria-hidden="true">*</span></label>
-            <input class="input" id="f-subject" name="subject" type="text" required maxlength="160" aria-describedby="err-subject">
-            <p class="error" id="err-subject"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><span></span></p>
-          </div>
-          <div class="field">
-            <label for="f-message">Mensaje <span aria-hidden="true">*</span></label>
-            <textarea class="input" id="f-message" name="message" rows="6" required maxlength="2000" aria-describedby="err-message"></textarea>
-            <p class="error" id="err-message"><svg class="i" aria-hidden="true"><use href="#i-alert"/></svg><span></span></p>
-          </div>
-
-          <div class="hp" aria-hidden="true">
-            <label for="f-web">No completar este campo</label>
-            <input id="f-web" name="website" type="text" tabindex="-1" autocomplete="off">
-          </div>
-
-          <div class="form-actions">
-            <button class="btn btn-primary" id="submit-btn" type="submit">
-              <span class="spinner" aria-hidden="true"></span>
-              <span class="btn-label">Enviar mensaje</span>
-            </button>
-            <p class="hint">Los campos con * son obligatorios.</p>
-          </div>
-
-          <div class="status" id="form-status" role="status" aria-live="polite"></div>
-        </form>
+        <div class="card form contact-email-card" data-reveal style="--d:.1s">
+          <span class="contact-email-icon" aria-hidden="true"><svg class="i"><use href="#i-mail"/></svg></span>
+          <p class="contact-email-label">Correo de contacto</p>
+          <a class="contact-email-link" href="mailto:avenirstack@gmail.com">avenirstack@gmail.com</a>
+          <p class="contact-email-note">Escribinos directamente; te responderemos por correo.</p>
+        </div>
       </div>
     </section>
   </main>
