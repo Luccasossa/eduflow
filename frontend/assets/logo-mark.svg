@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Logotipo de AvenirStack">
+  <rect width="48" height="48" rx="13" fill="#101114"/>
+  <g fill="none" stroke-width="4.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M10 22 L24 10 L38 22" stroke="#C6F04A"/>
+    <path d="M10 30 L24 18 L38 30" stroke="#2547E8"/>
+    <path d="M10 38 L24 26 L38 38" stroke="#5F31C4"/>
+  </g>
+</svg>

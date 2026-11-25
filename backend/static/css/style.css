@@ -1654,11 +1654,11 @@ button:disabled { cursor: wait; opacity: .68; }
 .academic-toast.visible { opacity: 1; }
 .academic-toast.error { background: #991b1b; }
 
-/* Shared responsive footer and emphasized logout action */
-.eduflow-footer { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px 24px; margin-top: 38px; padding: 24px clamp(16px, 3vw, 36px); border-radius: 12px; background: #102a56; color: #fff; font-size: 14px; line-height: 1.55; }
-.main > .eduflow-footer { margin-top: auto; }
-.eduflow-footer p { margin: 0; }
-.eduflow-footer p:first-child { grid-column: 1 / -1; font-weight: 700; }
+/* Compact attribution footer */
+.avenir-attribution { margin-top: auto; padding: 24px 12px 8px; text-align: center; color: #6b7280; font-size: 14px; line-height: 1.5; }
+.avenir-attribution p { margin: 0; }
+.avenir-attribution a { color: #2563eb; font-weight: 600; text-decoration: none; }
+.avenir-attribution a:hover, .avenir-attribution a:focus-visible { color: #1d4ed8; text-decoration: underline; }
 .logout-button { justify-content: center; background: #f97316 !important; color: #fff !important; font-weight: 700; }
 .logout-button:hover { background: #ea580c !important; color: #fff !important; }
 

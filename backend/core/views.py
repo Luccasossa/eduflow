@@ -62,3 +62,8 @@ def api_notificaciones(request):
     if not isinstance(ids, list): return JsonResponse({"error": "Solicitud no válida."}, status=400)
     rows.filter(pk__in=ids).update(leida=True)
     return JsonResponse({"actualizadas": True})
+
+
+def avenirstack(request):
+    """Serve the public AvenirStack landing page."""
+    return render(request, "avenirstack.html")

@@ -1152,9 +1152,10 @@ nav {
         .profile-fields input { width: 100%; padding: 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--surface-alt); color: var(--text); }
         .password-field { display:flex; align-items:stretch; gap:6px; } .password-field input { min-width:0; flex:1; } .password-field button { border:1px solid var(--border); border-radius:7px; padding:0 10px; cursor:pointer; }
         .profile-password-unavailable label { display:grid; gap:5px; font-size:13px; color:var(--text-muted); }
-        .eduflow-footer { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr)); gap:8px 24px; margin-top:38px; padding:24px clamp(16px,3vw,36px); border-radius:12px; background:#102a56; color:#fff; font-size:14px; line-height:1.55; }
-        .main > .eduflow-footer { margin-top:auto; }
-        .eduflow-footer p { margin:0; } .eduflow-footer p:first-child { grid-column:1 / -1; font-weight:700; }
+        .avenir-attribution { margin-top:auto; padding:24px 12px 8px; text-align:center; color:#6b7280; font-size:14px; line-height:1.5; }
+        .avenir-attribution p { margin:0; }
+        .avenir-attribution a { color:#2563eb; font-weight:600; text-decoration:none; }
+        .avenir-attribution a:hover, .avenir-attribution a:focus-visible { color:#1d4ed8; text-decoration:underline; }
         .logout-button { background:#f97316 !important; color:#fff !important; font-weight:700; }
         .teacher-document-editor { width:min(1100px, calc(100vw - 32px)); max-height:90vh; overflow:auto; }
         .teacher-document-editor .document-writing-area { min-height:min(58vh,620px); padding:24px clamp(16px,5vw,64px); }
@@ -1427,13 +1428,7 @@ nav {
             <div class="document-list" id="teacherDocumentList" aria-live="polite"><p class="muted">Cargando documentos…</p></div>
         </section>
 
-        <footer class="eduflow-footer">
-            <p>© 2026 EduFlow. Todos los derechos reservados.</p>
-            <p><strong>Desarrollado por:</strong> Carla Juliana Fernandez, Lucca Julian Sosa Alvarenga y Aarón Suárez.</p>
-            <p><strong>Institución:</strong> Universidad Económica Nacional IEN</p>
-            <p><strong>Carrera:</strong> Tecnicatura en Desarrollo de Software</p>
-            <p><strong>Año:</strong> Primer Año.</p>
-        </footer>
+        <footer class="avenir-attribution"><p>Elaborado por <a href="{% url 'core:avenirstack' %}">AvenirStack</a></p></footer>
     </main>
 
 
